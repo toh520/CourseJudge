@@ -1,0 +1,40 @@
+# ==============================================================================
+# CourseJudge - 根目录 Git 忽略规则
+# 严格防止敏感信息与本地生成数据提交至 Git 仓库
+# ==============================================================================
+
+# 1. 敏感数据与本地配置文件 (绝对严禁泄露)
+llm.txt
+.env
+.env.local
+.env.*.local
+
+# 2. 本地数据库文件 (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+course_judge.db
+
+# 3. Python 运行时与虚拟环境缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+venv/
+.venv/
+
+# 4. 判题临时工作目录与编译产物
+storage/temp_judge/
+project/storage/temp_judge/
+*.exe
+*.o
+*.obj
+
+# 5. IDE 与操作系统临时文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

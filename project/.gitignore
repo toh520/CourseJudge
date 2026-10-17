@@ -1,0 +1,63 @@
+# ==============================================================================
+# CourseJudge - Project 目录 Git 忽略规则
+# 严格防止敏感密钥、编译中间产物及本地数据库文件泄露至代码仓库
+# ==============================================================================
+
+# 1. 包含敏感私密信息的配置文件与数据
+llm.txt
+.env
+.env.local
+.env.*.local
+
+# 2. Python 运行时缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 3. 虚拟环境
+venv/
+env/
+ENV/
+.venv/
+
+# 4. SQLite 本地数据文件 (防止本地测试脏数据污染仓库)
+*.db
+*.sqlite
+*.sqlite3
+course_judge.db
+
+# 5. C++ 编译产物与判题临时目录
+storage/temp_judge/
+*.exe
+*.o
+*.obj
+*.out
+*.app
+
+# 6. 编辑器与 IDE 临时配置
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# 7. 操作系统自动生成的临时文件
+.DS_Store
+Thumbs.db
+Desktop.ini
