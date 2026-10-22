@@ -20,6 +20,7 @@ CourseJudge 是一个以 **Python** 作为主开发语言、采用 **PyWebView �
 - 🏛️ [**`docs/系统设计与架构方案.md`**](file:///d:/code/school/keshe/CourseJudge/docs/%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E4%B8%8E%E6%9E%B6%E6%9E%84%E6%96%B9%E6%A1%88.md)：技术选型、数据库模型设计与编译器探针机制
 - 🔌 [**`docs/业务接口与流程规范.md`**](file:///d:/code/school/keshe/CourseJudge/docs/%E4%B8%9A%E5%8A%A1%E6%8E%A5%E5%8F%A3%E4%B8%8E%E6%B5%81%E7%A8%8B%E8%A7%84%E8%8C%83.md)：业务时序流转与 API 接口定义
 - 📏 [**`docs/开发规范与代码准则.md`**](file:///d:/code/school/keshe/CourseJudge/docs/%E5%BC%80%E5%8F%91%E8%A7%84%E8%8C%83%E4%B8%8E%E4%BB%A3%E7%A0%81%E5%87%86%E5%88%99.md)：分层架构、中文注释、零硬编码与 Git 防泄露规范
+- 🗺️ [**`docs/开发计划与实施路线图.md`**](file:///d:/code/school/keshe/CourseJudge/docs/%E5%BC%80%E5%8F%91%E8%AE%A1%E5%88%92%E4%B8%8E%E5%AE%9E%E6%96%BD%E8%B7%AF%E7%BA%BF%E5%9B%BE.md)：系统细分阶段步骤、实时进度追踪与验收标准清单
 
 ---
 
