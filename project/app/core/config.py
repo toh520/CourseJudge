@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_MODEL_NAME: str = "deepseek-chat"
 
+    # --- LLM 调用可靠性与上下文裁剪参数 ---
+    LLM_TIMEOUT_SECONDS: int = 120          # 单次请求超时秒数
+    LLM_MAX_RETRIES: int = 3                # 失败后的最大重试次数 (总尝试次数 = 1 + 重试次数)
+    LLM_RETRY_BACKOFF_SECONDS: float = 1.0  # 指数退避基准秒数
+    LLM_MAX_TOKENS: int = 4096              # 单次回复最大 token 数
+    LLM_DEFAULT_TEMPERATURE: float = 0.7    # 默认采样温度
+    LLM_MAX_CODE_CHARS: int = 4000          # 诊断提示词中单份源码最大字符数
+    LLM_MAX_HISTORY_MESSAGES: int = 20      # AI 助手保留的历史消息条数上限
+
     # --- 身份认证与安全参数 (明文密码配合轻量 JWT 令牌) ---
     SECRET_KEY: str = "course_judge_default_secret_key_change_me_in_prod"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # Token 默认有效期 24 小时 (1440分钟)

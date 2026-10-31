@@ -5,11 +5,11 @@
 """
 
 import os
-import sys
 import signal
 import shutil
 import uuid
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -102,7 +102,14 @@ class SandboxRunner:
             # 编译阶段超时也视作编译失败
             return False, "编译超时 (超过 %.0f 秒)" % settings.COMPILE_TIMEOUT_SECONDS, None
 
-    def run_executable(self, executable_path: Path, input_data: str, work_dir: Path) -> dict:
+    def run_executable(
+        self,
+        executable_path: Path,
+        input_data: str,
+        work_dir: Path,
+        time_limit_ms: Optional[int] = None,
+        memory_limit_mb: Optional[int] = None,
+    ) -> dict:
         """
         在受限子进程中执行编译产物并喂入测试输入
 
@@ -110,6 +117,8 @@ class SandboxRunner:
             executable_path (Path): 编译生成的可执行文件绝对路径
             input_data (str): 喂入标准输入 (stdin) 的测试用例数据
             work_dir (Path): 隔离工作目录 (作为可执行程序的运行工作目录)
+            time_limit_ms (Optional[int]): 题目级时间限制毫秒数，为空时回退全局默认配置
+            memory_limit_mb (Optional[int]): 题目级内存限制MB数，为空时回退全局默认配置
 
         返回:
             dict: 包含运行状态、标准输出、耗时毫秒数及错误信息的结果字典
@@ -120,9 +129,14 @@ class SandboxRunner:
                       "error_msg": str
                   }
         """
-        # 载入默认时间限制阈值 (毫秒)
-        time_limit_ms = settings.DEFAULT_TIME_LIMIT_MS
-        time_limit_ms = settings.DEFAULT_TIME_LIMIT_MS
+        # 题目级限制优先，缺省时回退全局默认阈值
+        time_limit_ms = (
+            time_limit_ms if time_limit_ms and time_limit_ms > 0 else settings.DEFAULT_TIME_LIMIT_MS
+        )
+        memory_limit_mb = (
+            memory_limit_mb if memory_limit_mb and memory_limit_mb > 0 else settings.DEFAULT_MEMORY_LIMIT_MB
+        )
+
         # 崩溃程序会因 Windows 错误报告(WER)后台收集而延迟自然退出(实测约 1.7s 以上)，
         # 追加 WER 缓冲作为"强杀上界"(上界 = 时间限制 + 缓冲)，让已自行退出的崩溃程序携带非零返回码
         # 返回，从而与真正死循环(永不退出)在语义上可区分，避免崩溃被误判为 TLE。
@@ -151,19 +165,38 @@ class SandboxRunner:
             errors="replace",
         )
 
-        start_time = _monotonic_ms()
-        # 计算本次判定允许的超时轮询边界 (追加少量缓冲应对进程启动开销)
+        # 启动内存上限监控线程: 持续轮询常驻内存，超限立即强杀进程树
+        memory_monitor = _MemoryMonitor(proc, memory_limit_mb, self._kill_process_tree)
+        memory_monitor.start()
 
+        start_time = _monotonic_ms()
+        timed_out = False
         try:
             stdout, stderr = proc.communicate(input=input_data, timeout=hard_timeout_ms / 1000.0)
         except subprocess.TimeoutExpired:
             # 运行超时: 强杀进程树后收集已输出内容
+            timed_out = True
             self._kill_process_tree(proc)
             try:
                 stdout, stderr = proc.communicate()
             except Exception:
                 stdout, stderr = "", str(stderr) if stderr else ""
-            elapsed_ms = int(_monotonic_ms() - start_time)
+        finally:
+            # 无论正常结束还是异常，都必须停止监控线程，避免线程泄漏
+            memory_monitor.stop()
+
+        elapsed_ms = int(_monotonic_ms() - start_time)
+
+        # 内存超限优先级最高: 进程是被监控器主动强杀的
+        if memory_monitor.exceeded:
+            return {
+                "status": "Runtime Error",
+                "stdout": (stdout or "").strip(),
+                "time_ms": elapsed_ms,
+                "error_msg": "内存超限 (限制 %d MB)，已强制终止进程" % memory_limit_mb,
+            }
+
+        if timed_out:
             return {
                 "status": "Time Limit Exceeded",
                 "stdout": (stdout or "").strip(),
@@ -171,7 +204,6 @@ class SandboxRunner:
                 "error_msg": "运行超时，已强制终止进程",
             }
 
-        elapsed_ms = int(_monotonic_ms() - start_time)
         # 若子进程非零退出 (段错误/除零/非法访问等) 归类为运行错误
         if proc.returncode != 0:
             return {
@@ -230,6 +262,69 @@ class SandboxRunner:
         """
         if work_dir and work_dir.exists():
             shutil.rmtree(work_dir, ignore_errors=True)
+
+
+class _MemoryMonitor:
+    """
+    子进程内存上限监控器
+
+    在独立守护线程中以固定间隔轮询目标进程的常驻内存 (RSS)，一旦超过阈值立即回调
+    强杀进程树，并记录超限标记供调用方归类为运行错误。
+    """
+
+    def __init__(self, proc: subprocess.Popen, limit_mb: int, kill_callback, interval_seconds: float = 0.02):
+        """
+        参数:
+            proc (subprocess.Popen): 被监控的子进程对象
+            limit_mb (int): 允许的最大常驻内存 MB 数
+            kill_callback: 内存超限时执行强杀的回调函数
+            interval_seconds (float): 轮询间隔秒数 (默认 20ms)
+        """
+        self._proc = proc
+        self._limit_mb = limit_mb
+        self._kill_callback = kill_callback
+        self._interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._exceeded = False
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+
+    @property
+    def exceeded(self) -> bool:
+        """返回监控期间是否发生过内存超限"""
+        return self._exceeded
+
+    def start(self) -> None:
+        """启动后台监控线程"""
+        self._thread.start()
+
+    def stop(self) -> None:
+        """通知监控线程退出并等待其结束，避免线程泄漏"""
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
+
+    def _watch(self) -> None:
+        """监控循环: 定期读取进程 RSS，超限时强杀并退出"""
+        try:
+            import psutil
+            process = psutil.Process(self._proc.pid)
+        except Exception:
+            # 进程已退出或 psutil 不可用: 放弃监控，交由主流程按返回码判定
+            return
+
+        while not self._stop_event.is_set():
+            # 进程已自然退出则无需继续监控
+            if self._proc.poll() is not None:
+                return
+            try:
+                rss_mb = process.memory_info().rss / (1024 * 1024)
+            except Exception:
+                # 进程已退出或无法读取内存信息
+                return
+            if rss_mb > self._limit_mb:
+                self._exceeded = True
+                self._kill_callback(self._proc)
+                return
+            self._stop_event.wait(self._interval_seconds)
 
 
 def _monotonic_ms() -> float:

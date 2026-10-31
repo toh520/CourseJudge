@@ -28,6 +28,13 @@ class JudgeService:
     STATUS_CE = "CE"
     STATUS_RE = "RE"
 
+    # 沙箱原始运行状态 -> 统一判题状态码映射 (内存超限由沙箱归类为 Runtime Error)
+    _SANDBOX_STATUS_MAP = {
+        "Accepted": STATUS_AC,
+        "Time Limit Exceeded": STATUS_TLE,
+        "Runtime Error": STATUS_RE,
+    }
+
     def __init__(self) -> None:
         """初始化判题核心三组件: 探针、沙箱、比对器（单一实例复用）"""
         self.probe = CompilerProbe()
@@ -48,7 +55,14 @@ class JudgeService:
         compile_ok, compiler_output, executable_path = self.sandbox.compile_source(source_code, work_dir)
         return compile_ok, compiler_output, work_dir, executable_path
 
-    def run_custom_test(self, source_code: str, input_data: str, expected_output: str = "") -> dict:
+    def run_custom_test(
+        self,
+        source_code: str,
+        input_data: str,
+        expected_output: str = "",
+        time_limit_ms: Optional[int] = None,
+        memory_limit_mb: Optional[int] = None,
+    ) -> dict:
         """
         执行单点自测运行逻辑 (不记录任何分数)
 
@@ -56,6 +70,8 @@ class JudgeService:
             source_code (str): 用户提交的 C++ 源代码
             input_data (str): 本次自测喂入的标准输入数据
             expected_output (str): 本次自测期望的标准输出 (可为空，用于可选比对)
+            time_limit_ms (Optional[int]): 题目级时间限制毫秒数，为空时使用全局默认值
+            memory_limit_mb (Optional[int]): 题目级内存限制MB数，为空时使用全局默认值
 
         返回:
             dict: 自测结果字典，包含编译状态、执行状态、输出、耗时与比对结论
@@ -82,31 +98,53 @@ class JudgeService:
             return result
 
         try:
-            run_result = self.sandbox.run_executable(executable_path, input_data, work_dir)
-            result["execution_status"] = run_result["status"]
+            run_result = self.sandbox.run_executable(
+                executable_path,
+                input_data,
+                work_dir,
+                time_limit_ms=time_limit_ms,
+                memory_limit_mb=memory_limit_mb,
+            )
+            # 将沙箱原始状态统一映射为系统判题状态码
+            result["execution_status"] = self._SANDBOX_STATUS_MAP.get(
+                run_result["status"], run_result["status"]
+            )
             result["stdout"] = run_result["stdout"]
             result["time_ms"] = run_result["time_ms"]
             result["error_msg"] = run_result["error_msg"]
 
-            # 若提供了期望输出，则进行文本智能比对
-            if expected_output is not None and expected_output != "":
+            # 仅在程序正常执行完成时才有必要比对答案，避免 TLE/RE 被误判为 WA
+            if (
+                expected_output is not None
+                and expected_output != ""
+                and result["execution_status"] == self.STATUS_AC
+            ):
                 accepted, message = self.comparator.compare(result["stdout"], expected_output)
                 result["is_accepted"] = accepted
                 if not accepted:
                     result["execution_status"] = self.STATUS_WA
+                    result["error_msg"] = message
         finally:
             # 自测结束务必清理隔离目录，避免磁盘残留
             self.sandbox.cleanup(work_dir)
 
         return result
 
-    def judge_submission(self, source_code: str, test_cases: List) -> dict:
+    def judge_submission(
+        self,
+        source_code: str,
+        test_cases: List,
+        time_limit_ms: Optional[int] = None,
+        memory_limit_mb: Optional[int] = None,
+    ) -> dict:
         """
         遍历题目全部隐藏评测用例，计算通过百分比与得分
 
         参数:
             source_code (str): 学生提交的 C++ 源码
             test_cases (List): 测试用例集合 (TestCase ORM 对象或含 input_data/output_data/score_weight 属性的对象)
+            time_limit_ms (Optional[int]): 题目级时间限制毫秒数，为空时使用全局默认值
+            memory_limit_mb (Optional[int]): 题目级内存限制MB数，为空时使用全局默认值
 
         返回:
             dict: 判题结果字典，包含最终状态、得分、通过数、最大耗时及每个用例的明细
@@ -143,7 +181,17 @@ class JudgeService:
                 weight = int(getattr(case, "score_weight", 10) or 0)
                 total_weight += weight
 
-                run_result = self.sandbox.run_executable(executable_path, input_data, work_dir)
+                # 用例级限制优先于题目级参数 (TestCase 模型无此字段时回退题目级/全局默认)
+                case_time_limit = getattr(case, "time_limit_ms", None) or time_limit_ms
+                case_memory_limit = getattr(case, "memory_limit_mb", None) or memory_limit_mb
+
+                run_result = self.sandbox.run_executable(
+                    executable_path,
+                    input_data,
+                    work_dir,
+                    time_limit_ms=case_time_limit,
+                    memory_limit_mb=case_memory_limit,
+                )
                 time_used = run_result["time_ms"]
                 result["max_time_ms"] = max(result["max_time_ms"], time_used)
 
@@ -174,6 +222,7 @@ class JudgeService:
                     "expected": expected_output,
                     "time_ms": time_used,
                     "weight": weight,
+                    "error_msg": run_result.get("error_msg", ""),
                 })
 
             # 计算最终百分比得分 (权重加权)

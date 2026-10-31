@@ -40,3 +40,20 @@ copy .env.example .env
 python run.py
 ```
 系统将自动执行编译器自适应探针，启动内置服务并弹出原生桌面客户端窗口。
+
+## 开发阶段自动化验收
+
+```bash
+# Phase 1: 配置、数据库与数据模型
+python tests/test_phase1.py
+
+# Phase 2: C++ 判题引擎与编译器双模探针
+python tests/test_judge.py
+
+# Phase 3: LLM 服务与智能闭环 (默认使用假响应，不消耗 token)
+python tests/test_llm.py
+
+# 可选: 追加一次真实模型冒烟 (会消耗 token)
+# PowerShell: $env:RUN_REAL_LLM_TESTS=1; python tests/test_llm.py
+# CMD:        set RUN_REAL_LLM_TESTS=1 && python tests/test_llm.py
+```

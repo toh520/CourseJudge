@@ -71,26 +71,19 @@ class CompilerProbe:
         """
         mode = (settings.COMPILER_PROBE_MODE or "auto").strip().lower()
 
-        # 强制系统模式: 只允许系统环境 g++
+        # 强制系统模式: 只允许系统环境 g++，缺失时严格报错，绝不回退内置版本
         if mode == "system":
             system_path = self.find_system_compiler()
             if system_path:
                 return system_path
-            builtin_path = self.find_builtin_compiler()
-            if builtin_path:
-                return builtin_path
-            # 双模式均缺失时抛出明确异常供上层捕获
-            raise RuntimeError("未检测到可用的 C++ 编译器 (系统模式)，请先安装 g++ 或配置内置编译器")
+            raise RuntimeError("未检测到系统环境 g++ (system 模式)，请先安装 g++ 或切换 COMPILER_PROBE_MODE")
 
-        # 强制内置模式: 只允许项目内置便携版
+        # 强制内置模式: 只允许项目内置便携版，缺失时严格报错，绝不回退系统版本
         if mode == "builtin":
             builtin_path = self.find_builtin_compiler()
             if builtin_path:
                 return builtin_path
-            system_path = self.find_system_compiler()
-            if system_path:
-                return system_path
-            raise RuntimeError("未检测到可用的内置编译器 (builtin 模式)，请先放置项目内置 g++")
+            raise RuntimeError("未检测到项目内置便携编译器 (builtin 模式)，请先在 compiler/bin 放置 g++")
 
         # 默认 auto 模式: 优先系统 g++，缺失时平滑降级到内置便携版
         system_path = self.find_system_compiler()
@@ -116,12 +109,23 @@ class CompilerProbe:
         """
         返回编译器探针的可用状态概览 (供诊断接口使用)
 
+        本方法永不抛出异常：即使两种编译器均缺失，也会返回 ready=False 的状态快照，
+        避免系统状态接口在未安装编译器时直接返回 500。
+
         返回:
-            dict: 包含工作模式与系统/内置编译器是否存在的信息字典
+            dict: 包含工作模式、系统/内置编译器是否存在、最终解析路径与就绪标记的信息字典
         """
+        resolved_compiler: Optional[str] = None
+        try:
+            resolved_compiler = self.resolve_compiler()
+        except RuntimeError:
+            # 无可用编译器属于可预期的未就绪状态，交由前端展示诊断提示
+            resolved_compiler = None
+
         return {
             "mode": settings.COMPILER_PROBE_MODE or "auto",
             "system_compiler_available": self.find_system_compiler() is not None,
             "builtin_compiler_available": self.find_builtin_compiler() is not None,
-            "resolved_compiler": self.resolve_compiler(),
+            "resolved_compiler": resolved_compiler,
+            "ready": resolved_compiler is not None,
         }

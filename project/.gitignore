@@ -61,3 +61,12 @@ storage/temp_judge/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# 8. 内置便携编译器白名单 (需随仓库分发)
+#    先放行可能被子目录规则排除的 lib 目录，再整体放行 compiler/
+!compiler/
+!compiler/lib/
+!compiler/lib/**
+!compiler/lib64/
+!compiler/lib64/**
+!compiler/**

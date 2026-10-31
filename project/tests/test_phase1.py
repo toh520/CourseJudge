@@ -208,12 +208,16 @@ def run_phase1_verification():
 
     finally:
         db.close()
+        # 释放连接池持有的文件句柄，确保 Windows 下能够彻底删除测试数据库
+        engine.dispose()
         # 清理测试数据库
         if TEST_DB_FILE.exists():
             try:
                 TEST_DB_FILE.unlink()
             except Exception:
                 pass
+
+    assert not TEST_DB_FILE.exists(), "测试数据库文件未清理干净，请检查连接池是否已释放"
 
     print("\n" + "=" * 70)
     print(">>> 恭喜！Phase 1 全部自动化测试用例 100% 验收通过！ <<<")
