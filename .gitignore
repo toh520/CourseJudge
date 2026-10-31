@@ -38,3 +38,9 @@ project/storage/temp_judge/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 6. 便携编译器与本地临时产物(不入库)
+project/compiler/
+project/winlibs.zip
+project/mini_test.cpp
+project/storage/
