@@ -38,11 +38,19 @@ class Settings(BaseSettings):
     # builtin: 强制内置绿色版 | system: 强制系统环境版
     COMPILER_PROBE_MODE: str = "auto"
     BUILTIN_COMPILER_BIN_DIR: str = "compiler/bin"
+    # 可选: 纯 ASCII 路径下的内置编译器二进制目录。当项目路径含非 ASCII 字符(如中文)导致 GNU ld
+    # 无法按正确编码打开标准库时，可在此指定一份放置于 ASCII 路径的编译器副本(如 C:\Users\xxx\CompilerPortable\bin)。
+    BUILTIN_COMPILER_ASCII_DIR: str = ''
 
     # --- 判题沙箱资源约束阈值 ---
     DEFAULT_TIME_LIMIT_MS: int = 1000       # 默认运行超时时间 1000 毫秒
     DEFAULT_MEMORY_LIMIT_MB: int = 256      # 默认运行内存限制 256 MB
     COMPILE_TIMEOUT_SECONDS: int = 10       # 编译阶段最长等待时间 10 秒
+
+    # Windows 崩溃程序会因 WER (Windows 错误报告) 后台收集而延迟自然退出(实测约 1.7s 以上)。
+    # 该缓冲作为判题"强杀上界"(上界 = DEFAULT_TIME_LIMIT_MS + DEFAULT_EXEC_GRACE_MS)，
+    # 用于让"已崩溃程序(非零返回码)"与"真正死循环(上界仍不退出)"在语义上可区分，避免崩溃误判为 TLE。
+    DEFAULT_EXEC_GRACE_MS: int = 4000       # 崩溃/系统错误报告缓冲毫秒数
 
     # --- 存储路径 ---
     STORAGE_DIR: str = "storage"
