@@ -22,7 +22,9 @@ class GeneratedProblem(BaseModel):
     time_limit_ms: int = Field(default=1000, ge=100, le=10000, description="时间限制毫秒数")
     memory_limit_mb: int = Field(default=256, ge=16, le=1024, description="内存限制MB数")
     knowledge_tag: str = Field(default="", max_length=50, description="核心知识点标签")
-    standard_code: str = Field(..., min_length=1, description="标准 C++17 解答源码")
+    # 允许为空：仅复用题目信息生成测试输入时（无需标准解答）可构造该模型；
+    # 完整出题路径会在 ProblemGenerator 中强制校验标准代码非空。
+    standard_code: str = Field(default="", description="标准 C++17 解答源码")
 
     @field_validator("input_format", "output_format", "sample_input", "sample_output", "knowledge_tag", mode="before")
     @classmethod

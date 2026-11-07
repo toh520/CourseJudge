@@ -64,7 +64,8 @@ class _SimpleCase:
         self.score_weight = int(item.get("score_weight", 10) or 0)
 
 
-@router.get("/training", summary="获取个人专属训练题列表")
+@router.get("/training/my", summary="获取个人专属训练题列表")
+@router.get("/training", summary="获取个人专属训练题列表（兼容旧路径）")
 def list_my_training(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CourseJudge · 智能代码判题与教学辅助</title>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/views.css">
+  <link rel="stylesheet" href="libs/monaco/vs/editor/editor.main.css">
+</head>
+<body>
+  <div id="app">
+    <div class="boot-screen">
+      <div class="boot-mark">&lt;/&gt;</div>
+      <h1>CourseJudge</h1>
+      <p>正在加载智能判题工作台…</p>
+      <div class="boot-bar"><span></span></div>
+    </div>
+  </div>
+
+  <div id="overlay-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <script src="libs/echarts/echarts.min.js"></script>
+  <script src="libs/monaco/vs/loader.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

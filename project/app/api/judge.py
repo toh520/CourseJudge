@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.models import Problem, Submission, User
 from app.services.judge.judge_service import JudgeService
 from app.api.deps import get_current_user
+from app.api.assignments import _ensure_access, ensure_time_window
 
 router = APIRouter()
 
@@ -64,6 +65,11 @@ def run_self_test(
         HTTPException 404: 题目不存在
     """
     problem = _get_problem_or_404(payload.problem_id, db)
+    assignment = problem.assignment
+    # 服务端强制校验班级成员关系与作业时间窗，防止越权刷题与截止后提交
+    _ensure_access(assignment, current_user, db)
+    ensure_time_window(assignment)
+
     result = _judge_service.run_custom_test(
         source_code=payload.code,
         input_data=payload.input_data,
@@ -100,6 +106,9 @@ def submit_solution(
     """
     problem = _get_problem_or_404(payload.problem_id, db)
     assignment = problem.assignment
+    # 服务端强制校验班级成员关系与作业时间窗
+    _ensure_access(assignment, current_user, db)
+    ensure_time_window(assignment)
 
     # 考试模式：检测是否已锁定最终交卷
     if assignment.type == "exam":
@@ -160,7 +169,8 @@ def submit_solution(
         "total_cases": judge_result["total_cases"],
         "max_time_ms": judge_result["max_time_ms"],
         "is_final": submission.is_final,
-        "case_results": judge_result["case_results"],
+        # 考试模式隐藏详细测试点数据，防止学生通过响应内容反推隐藏用例
+        "case_results": [] if assignment.type == "exam" else judge_result["case_results"],
     }
 
 

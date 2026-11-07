@@ -1,26 +1,47 @@
 """
 文件名: dashboard.py
 功能描述: 教师端班级学情与弱点大屏聚合路由。针对某次作业/考试，聚合计算
-          及格率、分数段分布、各题通过率、全班薄弱知识点 Top 统计。
-遵循规范: 数据聚合基于该作业全部学生的最终/最新提交；仅本班教师可查看，
-          提供清晰的分层统计便于前端大屏渲染。
+          应交/实交人数、平均分、及格率、四段分数分布、各题通过率与薄弱知识点 Top。
+遵循规范: 仅本班教师可查看；成绩按“每生每题最佳得分”计算，避免多题作业下
+          用单题最高分误当整份作业成绩。
 """
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Assignment, Class, Problem, Submission, User
+from app.models import Assignment, Class, ClassMember, Problem, Submission, User
 from app.api.deps import get_current_user
 
 router = APIRouter()
 
-# 分数段划分边界（企业课程常见及格线 60 分）
+# 及格线 (百分制)
 _PASS_THRESHOLD = 60
-_SCORE_BANDS = [(0, 59), (60, 79), (80, 100)]
+
+# 四段分数分布标签 (与需求规格说明书保持一致)
+_SCORE_BAND_LABELS = ("90-100", "80-89", "60-79", "0-59")
+
+
+def _score_band(score: float) -> str:
+    """
+    将百分制成绩映射到四段分布标签
+
+    参数:
+        score (float): 学生作业总评成绩 (0~100)
+
+    返回:
+        str: 分数段标签
+    """
+    if score >= 90:
+        return "90-100"
+    if score >= 80:
+        return "80-89"
+    if score >= 60:
+        return "60-79"
+    return "0-59"
 
 
 @router.get("/assignments/{assignment_id}/dashboard", summary="作业学情与薄弱点大屏")
@@ -38,7 +59,7 @@ def get_assignment_dashboard(
         db (Session): 数据库会话
 
     返回:
-        dict: 及格率、分数段分布、各题通过率、薄弱知识点 Top
+        dict: 应交/实交人数、平均分、及格率、四段分布、各题通过率、薄弱知识点 Top
 
     异常:
         HTTPException 403: 非本班教师
@@ -65,84 +86,131 @@ def get_assignment_dashboard(
     )
 
     # ------------------------------------------------------------------
-    # 1. 计算每个学生在该作业的最佳（或最终）提交得分
+    # 1. 应交人数（班级名册成员）与题目清单
     # ------------------------------------------------------------------
-    student_best_score: Dict[int, int] = {}
-    for sub in submissions:
-        student_best_score[sub.user_id] = max(
-            student_best_score.get(sub.user_id, 0), sub.score
+    member_rows = (
+        db.query(ClassMember)
+        .filter(ClassMember.class_id == assignment.class_id)
+        .all()
+    )
+    member_ids = {row.student_id for row in member_rows}
+    expected_student_count = len(member_ids)
+
+    problems = (
+        db.query(Problem)
+        .filter(Problem.assignment_id == assignment_id)
+        .order_by(Problem.id)
+        .all()
+    )
+    problem_ids = [problem.id for problem in problems]
+    problem_count = len(problem_ids)
+
+    # ------------------------------------------------------------------
+    # 2. 每生每题最佳得分 -> 每生作业总评（各题最佳得分平均分）
+    # ------------------------------------------------------------------
+    best_by_student_problem: Dict[tuple, int] = {}
+    for submission in submissions:
+        if submission.user_id not in member_ids or submission.problem_id not in problem_ids:
+            continue
+        key = (submission.user_id, submission.problem_id)
+        best_by_student_problem[key] = max(
+            best_by_student_problem.get(key, 0), submission.score or 0
         )
 
-    total_students = len(student_best_score)
-    pass_count = sum(1 for score in student_best_score.values() if score >= _PASS_THRESHOLD)
-    pass_rate = round(pass_count / total_students * 100, 1) if total_students else 0.0
+    student_scores: Dict[int, float] = {}
+    for user_id in {s.user_id for s in submissions if s.user_id in member_ids}:
+        total = sum(best_by_student_problem.get((user_id, pid), 0) for pid in problem_ids)
+        student_scores[user_id] = round(total / problem_count, 1) if problem_count else 0.0
 
-    # 2. 分数段分布
-    band_counts = {f"{lo}-{hi}": 0 for lo, hi in _SCORE_BANDS}
-    for score in student_best_score.values():
-        for lo, hi in _SCORE_BANDS:
-            if lo <= score <= hi:
-                band_counts[f"{lo}-{hi}"] += 1
-                break
+    submitted_student_count = len(student_scores)
+    pass_count = sum(1 for score in student_scores.values() if score >= _PASS_THRESHOLD)
+    pass_rate = (
+        round(pass_count / submitted_student_count * 100, 1)
+        if submitted_student_count else 0.0
+    )
+    average_score = (
+        round(sum(student_scores.values()) / submitted_student_count, 1)
+        if submitted_student_count else 0.0
+    )
 
     # ------------------------------------------------------------------
-    # 3. 各题通过率（submission 中 status == AC）
+    # 3. 四段分数分布
+    # ------------------------------------------------------------------
+    band_counts = {label: 0 for label in _SCORE_BAND_LABELS}
+    for score in student_scores.values():
+        band_counts[_score_band(score)] += 1
+
+    # ------------------------------------------------------------------
+    # 4. 各题通过率（按学生去重，避免同一学生多次提交放大样本）
     # ------------------------------------------------------------------
     problem_stats: List[Dict] = []
-    problems = (
-        db.query(Problem).filter(Problem.assignment_id == assignment_id).order_by(Problem.id).all()
-    )
     for problem in problems:
-        problem_subs = [s for s in submissions if s.problem_id == problem.id]
-        if not problem_subs:
-            problem_stats.append({"problem_id": problem.id, "problem_title": problem.title,
-                                  "submissions": 0, "ac_rate": 0.0})
-            continue
-        ac_count = sum(1 for s in problem_subs if s.status == "AC")
+        problem_subs = [
+            s for s in submissions
+            if s.problem_id == problem.id and s.user_id in member_ids
+        ]
+        student_ids = {s.user_id for s in problem_subs}
+        ac_ids = {s.user_id for s in problem_subs if s.status == "AC"}
         problem_stats.append({
             "problem_id": problem.id,
             "problem_title": problem.title,
             "knowledge_tag": problem.knowledge_tag,
             "submissions": len(problem_subs),
-            "ac_count": ac_count,
-            "ac_rate": round(ac_count / len(problem_subs) * 100, 1),
+            "students": len(student_ids),
+            "ac_count": len(ac_ids),
+            "ac_rate": (
+                round(len(ac_ids) / len(student_ids) * 100, 1)
+                if student_ids else 0.0
+            ),
         })
 
     # ------------------------------------------------------------------
-    # 4. 全班薄弱知识点 Top（按非 AC 提交知识点计数, ALL 计数实体）
+    # 5. 全班薄弱知识点 Top（按学生去重统计失分率）
     # ------------------------------------------------------------------
-    tag_correct = defaultdict(int)   # 知识点正确提交数
-    tag_total = defaultdict(int)     # 知识点提交总次数
+    tag_students = defaultdict(set)
+    tag_failed = defaultdict(set)
     problem_tag_map = {p.id: (p.knowledge_tag or "未标注") for p in problems}
-    for sub in submissions:
-        tag = problem_tag_map.get(sub.problem_id, "未标注")
-        tag_total[tag] += 1
-        if sub.status == "AC":
-            tag_correct[tag] += 1
+    for submission in submissions:
+        if submission.user_id not in member_ids:
+            continue
+        tag = problem_tag_map.get(submission.problem_id, "未标注")
+        tag_students[tag].add(submission.user_id)
+        if submission.status != "AC":
+            tag_failed[tag].add(submission.user_id)
 
-    weak_tags: List[Dict] = []
-    for tag in tag_total:
-        correct = tag_correct.get(tag, 0)
-        total = tag_total[tag]
-        fail_rate = round((total - correct) / total * 100, 1) if total else 0.0
+    weak_tags = []
+    for tag, students in tag_students.items():
+        failed = tag_failed.get(tag, set())
         weak_tags.append({
             "tag": tag,
-            "total_submissions": total,
-            "correct_submissions": correct,
-            "fail_rate": fail_rate,
+            "total_students": len(students),
+            "failed_students": len(failed),
+            "fail_rate": (
+                round(len(failed) / len(students) * 100, 1)
+                if students else 0.0
+            ),
         })
-    # 按失分率降序取 Top 5
-    weak_tags.sort(key=lambda x: x["fail_rate"], reverse=True)
+    weak_tags.sort(
+        key=lambda item: (item["fail_rate"], item["failed_students"]),
+        reverse=True,
+    )
     weak_tags = weak_tags[:5]
 
     return {
         "assignment_id": assignment.id,
         "assignment_title": assignment.title,
         "assignment_type": assignment.type,
-        "student_count": total_students,
+        "expected_student_count": expected_student_count,
+        "submitted_student_count": submitted_student_count,
+        # 兼容旧前端字段：student_count 仍表示实交人数
+        "student_count": submitted_student_count,
+        "average_score": average_score,
         "pass_rate": pass_rate,
         "pass_threshold": _PASS_THRESHOLD,
-        "score_bands": [{"band": band, "count": band_counts[band]} for band in band_counts],
+        "score_bands": [
+            {"band": label, "count": band_counts[label]}
+            for label in _SCORE_BAND_LABELS
+        ],
         "problem_stats": problem_stats,
         "weak_knowledge_top": weak_tags,
     }

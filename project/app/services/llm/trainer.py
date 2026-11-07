@@ -96,6 +96,9 @@ class TrainingProblemGenerator:
                 "强化题结构不符合预期: %s" % exc
             ) from exc
 
+        if not generated.standard_code.strip():
+            raise LLMResponseFormatError("模型未返回可用的强化题标准解答代码")
+
         test_inputs = generated.test_inputs[:self.MAX_TEST_COUNT]
         cases = verify_standard_code(
             generated.standard_code,

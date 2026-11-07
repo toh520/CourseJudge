@@ -6,21 +6,45 @@
           时间窗在业务层不强制（当前阶段由前端控制），后续可扩展。
 """
 
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Assignment, Class, ClassMember, Problem, TestCase, User
+from app.models import Assignment, Class, ClassMember, Problem, Submission, TestCase, User
 from app.api.deps import get_current_user
 
 router = APIRouter()
 
 # 支持的作业类型
 VALID_ASSIGNMENT_TYPES = {"practice", "exam"}
+
+
+class TestCaseCreateRequest(BaseModel):
+    """发布作业时内联的测试用例"""
+
+    input_data: str = Field("", description="测试输入")
+    output_data: str = Field("", description="期望输出")
+    score_weight: int = Field(10, ge=0, description="用例分值权重")
+
+
+class ProblemCreateRequest(BaseModel):
+    """发布作业时内联的题目"""
+
+    title: str = Field(..., min_length=1, max_length=100, description="题目标题")
+    description: str = Field(..., min_length=1, description="Markdown 题面")
+    input_format: str = Field("", description="输入格式")
+    output_format: str = Field("", description="输出格式")
+    sample_input: str = Field("", description="样例输入")
+    sample_output: str = Field("", description="样例输出")
+    time_limit_ms: int = Field(1000, ge=100, le=10000, description="时间限制毫秒")
+    memory_limit_mb: int = Field(256, ge=16, le=1024, description="内存限制MB")
+    knowledge_tag: str = Field("", max_length=50, description="知识点标签")
+    is_ai_generated: bool = Field(False, description="是否 AI 生成")
+    test_cases: List[TestCaseCreateRequest] = Field(default_factory=list, description="测试用例列表")
 
 
 class AssignmentCreateRequest(BaseModel):
@@ -31,6 +55,9 @@ class AssignmentCreateRequest(BaseModel):
     type: str = Field("practice", description="practice(练习) / exam(考试)")
     start_time: Optional[datetime] = Field(None, description="允许作答开始时间")
     end_time: Optional[datetime] = Field(None, description="截止交卷时间")
+    problems: List[ProblemCreateRequest] = Field(
+        default_factory=list, description="随作业一并发布的题目与用例清单"
+    )
 
 
 def _problem_to_dict(problem: Problem) -> dict:
@@ -91,17 +118,59 @@ def create_assignment(
             detail="只有本班教师可发布作业",
         )
 
+    now = datetime.now(timezone.utc)
+    start_time = _as_utc(payload.start_time) or now
+    end_time = _as_utc(payload.end_time) or (start_time + timedelta(days=7))
+    if end_time <= start_time:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="截止时间必须晚于开始时间",
+        )
+
     assignment = Assignment(
         class_id=payload.class_id,
         title=payload.title.strip(),
         type=payload.type,
-        start_time=payload.start_time or datetime.utcnow(),
-        end_time=payload.end_time or datetime.utcnow(),
+        start_time=start_time,
+        end_time=end_time,
         created_by=current_user.id,
     )
-    db.add(assignment)
-    db.commit()
-    db.refresh(assignment)
+
+    try:
+        db.add(assignment)
+        db.flush()  # 先取得作业 ID，供下属题目关联
+
+        # 将随作业一并提交的题目与测试用例持久化，形成完整发布事务
+        for problem_payload in payload.problems:
+            problem = Problem(
+                assignment_id=assignment.id,
+                title=problem_payload.title.strip(),
+                description=problem_payload.description,
+                input_format=problem_payload.input_format,
+                output_format=problem_payload.output_format,
+                sample_input=problem_payload.sample_input,
+                sample_output=problem_payload.sample_output,
+                time_limit_ms=problem_payload.time_limit_ms,
+                memory_limit_mb=problem_payload.memory_limit_mb,
+                knowledge_tag=problem_payload.knowledge_tag.strip(),
+                is_ai_generated=problem_payload.is_ai_generated,
+            )
+            db.add(problem)
+            db.flush()
+
+            for case_payload in problem_payload.test_cases:
+                db.add(TestCase(
+                    problem_id=problem.id,
+                    input_data=case_payload.input_data,
+                    output_data=case_payload.output_data,
+                    score_weight=case_payload.score_weight,
+                ))
+
+        db.commit()
+        db.refresh(assignment)
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "id": assignment.id,
@@ -110,6 +179,7 @@ def create_assignment(
         "type": assignment.type,
         "start_time": assignment.start_time.isoformat() if assignment.start_time else None,
         "end_time": assignment.end_time.isoformat() if assignment.end_time else None,
+        "problem_count": len(payload.problems),
     }
 
 
@@ -155,6 +225,89 @@ def list_assignment_problems(
         "assignment_type": assignment.type,
         "problem_count": len(problems),
         "problems": [_problem_to_dict(p) for p in problems],
+    }
+
+
+@router.get("/assignments/class/{class_id}", summary="按班级获取作业列表")
+def list_class_assignments(
+    class_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取某班级下的全部作业/考试，供教师工作台与学生“我的作业”大厅使用
+
+    参数:
+        class_id (int): 班级 ID
+        current_user (User): 当前登录用户
+        db (Session): 数据库会话
+
+    返回:
+        dict: 作业列表，含时间状态与学生个人最佳得分
+
+    异常:
+        HTTPException 403: 非本班成员
+        HTTPException 404: 班级不存在
+    """
+    clazz = db.query(Class).filter(Class.id == class_id).first()
+    if not clazz:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="班级不存在",
+        )
+
+    is_teacher = clazz.teacher_id == current_user.id
+    is_member = (
+        db.query(ClassMember)
+        .filter(
+            ClassMember.class_id == class_id,
+            ClassMember.student_id == current_user.id,
+        )
+        .first()
+        is not None
+    )
+    if not (is_teacher or is_member):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限查看该班级作业（非本班成员）",
+        )
+
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.class_id == class_id)
+        .order_by(Assignment.start_time.desc(), Assignment.id.desc())
+        .all()
+    )
+
+    items = []
+    for assignment in assignments:
+        item = {
+            "id": assignment.id,
+            "title": assignment.title,
+            "type": assignment.type,
+            "start_time": assignment.start_time.isoformat() if assignment.start_time else None,
+            "end_time": assignment.end_time.isoformat() if assignment.end_time else None,
+            "time_status": _time_status(assignment),
+            "problem_count": len(assignment.problems),
+        }
+        if not is_teacher:
+            my_submissions = (
+                db.query(Submission)
+                .filter(
+                    Submission.assignment_id == assignment.id,
+                    Submission.user_id == current_user.id,
+                )
+                .all()
+            )
+            item["my_submission_count"] = len(my_submissions)
+            item["my_best_score"] = max((sub.score for sub in my_submissions), default=0)
+        items.append(item)
+
+    return {
+        "class_id": clazz.id,
+        "class_name": clazz.name,
+        "assignment_count": len(items),
+        "assignments": items,
     }
 
 
@@ -227,4 +380,68 @@ def _ensure_access(assignment: Assignment, user: User, db: Session) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权限访问该作业（非本班成员）",
+        )
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """
+    将数据库/请求中的时间统一转换为 UTC 感知时间
+
+    SQLite 会丢失时区信息，因此对 naive datetime 统一按 UTC 处理。
+
+    参数:
+        value (Optional[datetime]): 原始时间
+
+    返回:
+        Optional[datetime]: UTC 感知时间
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _time_status(assignment: Assignment) -> str:
+    """
+    计算作业当前的时间状态
+
+    参数:
+        assignment (Assignment): 作业实体
+
+    返回:
+        str: upcoming(未开始) / ongoing(进行中) / ended(已截止)
+    """
+    now = datetime.now(timezone.utc)
+    start = _as_utc(assignment.start_time)
+    end = _as_utc(assignment.end_time)
+    if start and now < start:
+        return "upcoming"
+    if end and now > end:
+        return "ended"
+    return "ongoing"
+
+
+def ensure_time_window(assignment: Assignment) -> None:
+    """
+    校验当前时间是否处于作业允许作答的时间窗内
+
+    参数:
+        assignment (Assignment): 作业实体
+
+    异常:
+        HTTPException 403: 作业尚未开始或已截止
+    """
+    now = datetime.now(timezone.utc)
+    start = _as_utc(assignment.start_time)
+    end = _as_utc(assignment.end_time)
+    if start and now < start:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="作业尚未开始，暂不可作答",
+        )
+    if end and now > end:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="作业已截止，不可继续作答",
         )

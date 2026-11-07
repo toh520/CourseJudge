@@ -109,7 +109,8 @@ def ai_generate_problem(
         ) from exc
 
 
-@router.post("/llm/generate-test-inputs", summary="针对已生成题目补充测试用例")
+@router.post("/llm/generate-testcases", summary="针对已生成题目补充测试用例")
+@router.post("/llm/generate-test-inputs", summary="针对已生成题目补充测试用例（兼容旧路径）")
 def ai_generate_test_inputs(
     payload: GenerateTestInputsRequest,
     current_user: User = Depends(get_current_user),
@@ -163,7 +164,8 @@ def ai_generate_test_inputs(
         ) from exc
 
 
-@router.post("/llm/diagnose", summary="考后一键短板诊断")
+@router.post("/llm/diagnose-assignment", summary="考后一键短板诊断")
+@router.post("/llm/diagnose", summary="考后一键短板诊断（兼容旧路径）")
 def ai_diagnose(
     payload: DiagnoseRequest,
     current_user: User = Depends(get_current_user),
@@ -193,12 +195,13 @@ def ai_diagnose(
         )
     _ensure_access(assignment, current_user, db)
 
-    # 收集该作业所有未 AC 的提交摘要 (problem_title/知识标签/状态/得分/代码)
-    submissions = (
-        db.query(Submission)
-        .filter(Submission.assignment_id == payload.assignment_id)
-        .all()
+    # 收集该作业的提交摘要；学生只能诊断自己的提交，教师可查看全班用于讲评
+    submissions_query = db.query(Submission).filter(
+        Submission.assignment_id == payload.assignment_id
     )
+    if current_user.role != "teacher":
+        submissions_query = submissions_query.filter(Submission.user_id == current_user.id)
+    submissions = submissions_query.all()
     problem_map = {p.id: p for p in db.query(Problem).filter(Problem.assignment_id == payload.assignment_id).all()}
     failed_items: List[Dict[str, Any]] = []
     for sub in submissions:
@@ -224,7 +227,8 @@ def ai_diagnose(
         ) from exc
 
 
-@router.post("/llm/training", summary="针对弱点生成强化训练题")
+@router.post("/llm/generate-training-problem", summary="针对弱点生成强化训练题")
+@router.post("/llm/training", summary="针对弱点生成强化训练题（兼容旧路径）")
 def ai_generate_training(
     payload: TrainingRequest,
     current_user: User = Depends(get_current_user),
@@ -270,7 +274,7 @@ def ai_generate_training(
 
 
 @router.post("/llm/chat", summary="AI 助教多轮对话（SSE 流式）")
-async def ai_chat(
+def ai_chat(
     payload: ChatRequest,
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -290,7 +294,8 @@ async def ai_chat(
     _require_llm_key()
     assistant = AssistantService()
 
-    async def event_generator():
+    # 使用同步生成器：Starlette 会将其放入线程池迭代，避免阻塞事件循环
+    def event_generator():
         try:
             for chunk in assistant.chat_stream(payload.message, payload.history):
                 yield f"data: {json.dumps({'delta': chunk}, ensure_ascii=False)}\n\n"

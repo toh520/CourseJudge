@@ -5,10 +5,15 @@
 遵循规范: 复用 config.API_V1_PREFIX；服务启动时初始化数据库表并注册各业务路由。
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.seed import seed_demo_accounts
 from app.api import auth, classes, assignments, judge, training, dashboard, llm, system
 
 # 服务启动时创建缺失的数据表（幂等）
@@ -33,6 +38,24 @@ app.include_router(dashboard.router, prefix=settings.API_V1_PREFIX, tags=["学�
 app.include_router(llm.router, prefix=settings.API_V1_PREFIX, tags=["AI 能力"])
 
 
+@app.on_event("startup")
+def _seed_on_startup() -> None:
+    """服务启动时初始化演示账号（仅 users 表为空时生效，幂等）"""
+    seed_demo_accounts()
+
+
+# 挂载 PyWebView / 浏览器共用的前端静态资源
+UI_DIR = Path(__file__).resolve().parent / "ui"
+if UI_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
+
+
+@app.get("/app", include_in_schema=False)
+def redirect_to_ui() -> RedirectResponse:
+    """便捷入口: 将 /app 重定向到桌面端前端页面"""
+    return RedirectResponse(url="/ui/")
+
+
 @app.get("/", summary="服务根路径")
 def root() -> dict:
     """根路径提示，引导访问 /docs 文档"""
@@ -40,6 +63,7 @@ def root() -> dict:
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "docs": "/docs",
+        "ui": "/ui/",
         "status": "ok",
     }
 
@@ -47,4 +71,9 @@ def root() -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run(
+        "app.main:app",
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
+        reload=False,
+    )

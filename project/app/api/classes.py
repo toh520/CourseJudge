@@ -108,6 +108,53 @@ def create_class(
     }
 
 
+@router.get("/classes/my", summary="获取当前用户所属班级列表")
+def list_my_classes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    获取当前登录用户所属的班级列表
+
+    教师返回自己创建的班级，学生返回已加入的班级。
+
+    参数:
+        current_user (User): 当前登录用户
+        db (Session): 数据库会话
+
+    返回:
+        dict: 班级列表与数量
+    """
+    if current_user.role == "teacher":
+        classes = (
+            db.query(Class)
+            .filter(Class.teacher_id == current_user.id)
+            .order_by(Class.id)
+            .all()
+        )
+    else:
+        classes = (
+            db.query(Class)
+            .join(ClassMember, ClassMember.class_id == Class.id)
+            .filter(ClassMember.student_id == current_user.id)
+            .order_by(Class.id)
+            .all()
+        )
+
+    items = [
+        {
+            "id": clazz.id,
+            "name": clazz.name,
+            # 邀请码仅对教师展示，学生端无需再次获取
+            "invite_code": clazz.invite_code if current_user.role == "teacher" else None,
+            "teacher_id": clazz.teacher_id,
+            "student_count": len(clazz.members),
+        }
+        for clazz in classes
+    ]
+    return {"class_count": len(items), "classes": items}
+
+
 @router.post("/classes/join", summary="学生凭邀请码加入班级")
 def join_class(
     payload: JoinClassRequest,

@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_PREFIX: str = "/api/v1"
 
+    # --- 本地服务监听地址 (桌面端与开发调试共用) ---
+    SERVER_HOST: str = "127.0.0.1"
+    SERVER_PORT: int = 8000
+
+    # --- 首次启动演示账号 (仅当 users 表为空时创建，便于课设演示) ---
+    SEED_DEMO_ACCOUNTS: bool = True
+    DEMO_TEACHER_USERNAME: str = "teacher"
+    DEMO_TEACHER_PASSWORD: str = "123456"
+    DEMO_STUDENT_USERNAME: str = "student"
+    DEMO_STUDENT_PASSWORD: str = "123456"
+
     # --- 数据库持久层配置 (默认采用项目级单文件 SQLite，开箱即用) ---
     DATABASE_URL: str = "sqlite:///./course_judge.db"
 
@@ -56,10 +67,11 @@ class Settings(BaseSettings):
     DEFAULT_MEMORY_LIMIT_MB: int = 256      # 默认运行内存限制 256 MB
     COMPILE_TIMEOUT_SECONDS: int = 10       # 编译阶段最长等待时间 10 秒
 
-    # Windows 崩溃程序会因 WER (Windows 错误报告) 后台收集而延迟自然退出(实测约 1.7s 以上)。
+    # Windows 崩溃程序会因 WER (Windows 错误报告) 与 Defender 首次扫描而延迟自然退出
+    # (实测新编译程序首次崩溃约 9.5s，后续运行约 1.7s)。
     # 该缓冲作为判题"强杀上界"(上界 = DEFAULT_TIME_LIMIT_MS + DEFAULT_EXEC_GRACE_MS)，
     # 用于让"已崩溃程序(非零返回码)"与"真正死循环(上界仍不退出)"在语义上可区分，避免崩溃误判为 TLE。
-    DEFAULT_EXEC_GRACE_MS: int = 4000       # 崩溃/系统错误报告缓冲毫秒数
+    DEFAULT_EXEC_GRACE_MS: int = 12000      # 崩溃/系统错误报告/首次扫描缓冲毫秒数
 
     # --- 存储路径 ---
     STORAGE_DIR: str = "storage"

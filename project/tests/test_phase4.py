@@ -43,13 +43,15 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_FILE}"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
-from app.core.database import SessionLocal  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.core.database import SessionLocal, engine  # noqa: E402
 from app.models import (  # noqa: E402
     User,
     Class,
     Assignment,
     Problem,
     TestCase,
+    Submission,
     TrainingProblem,
 )
 
@@ -85,12 +87,13 @@ def _ac_code() -> str:
 
 
 def _seed_users() -> None:
-    """预置教师与两名学生测试账号"""
+    """预置教师与三名学生测试账号（student3 用于越权校验）"""
     db = SessionLocal()
     try:
         db.add(User(username="teacher1", real_name="王老师", password="123456", role="teacher"))
         db.add(User(username="student1", real_name="小明", password="123456", role="student"))
         db.add(User(username="student2", real_name="小红", password="123456", role="student"))
+        db.add(User(username="student3", real_name="小刚", password="123456", role="student"))
         db.commit()
     finally:
         db.close()
@@ -123,6 +126,28 @@ def _add_problem(assignment_id: int, tag: str, case_output: str = "OK", weight: 
         ))
         db.commit()
         return problem.id
+    finally:
+        db.close()
+
+
+def _add_submission(user_id: int, assignment_id: int, problem_id: int,
+                    code: str, status: str = "WA", score: int = 0) -> int:
+    """直接写入一条提交记录，供隐私隔离测试使用"""
+    db = SessionLocal()
+    try:
+        submission = Submission(
+            user_id=user_id,
+            problem_id=problem_id,
+            assignment_id=assignment_id,
+            code=code,
+            status=status,
+            score=score,
+            time_used_ms=10,
+            is_final=False,
+        )
+        db.add(submission)
+        db.commit()
+        return submission.id
     finally:
         db.close()
 
@@ -179,6 +204,10 @@ def run_phase4_verification() -> None:
     token_s2 = r.json().get("access_token", "")
     check("学生2登录成功", r.status_code == 200 and bool(token_s2))
 
+    r = client.post("/api/v1/auth/login", json={"username": "student3", "password": "123456"})
+    token_s3 = r.json().get("access_token", "")
+    check("学生3登录成功（用于越权校验）", r.status_code == 200 and bool(token_s3))
+
     r = client.post("/api/v1/auth/login", json={"username": "teacher1", "password": "wrong"})
     check("错误密码登录被拒 401", r.status_code == 401)
 
@@ -217,6 +246,16 @@ def run_phase4_verification() -> None:
     r = client.get(f"/api/v1/classes/{class_id}/students", headers=_auth_headers(token_t))
     check("教师查看名册返回 2 名学生",
           r.status_code == 200 and r.json().get("student_count") == 2)
+
+    # 我的班级列表（教师/学生视角）
+    r = client.get("/api/v1/classes/my", headers=_auth_headers(token_t))
+    check("教师查看我的班级返回 1 个",
+          r.status_code == 200 and len(r.json().get("classes", [])) == 1,
+          f"status={r.status_code}")
+    r = client.get("/api/v1/classes/my", headers=_auth_headers(token_s1))
+    check("学生查看我的班级返回 1 个",
+          r.status_code == 200 and len(r.json().get("classes", [])) == 1,
+          f"status={r.status_code}")
 
     # ---------------------------------------------------------------------
     # 3. 作业/考试发布与题目读取 (Step 4.4)
@@ -259,6 +298,39 @@ def run_phase4_verification() -> None:
 
     problem_p = _add_problem(practice_id, "基础输入输出")
     problem_e = _add_problem(exam_id, "指针基础", case_output="OK")
+
+    # 按班级获取作业列表
+    r = client.get(f"/api/v1/assignments/class/{class_id}", headers=_auth_headers(token_s1))
+    check("学生按班级获取作业列表返回 2 条",
+          r.status_code == 200 and len(r.json().get("assignments", [])) == 2,
+          f"status={r.status_code}")
+
+    # 发布作业时内联题目与测试用例
+    r = client.post("/api/v1/assignments", json={
+        "class_id": class_id,
+        "title": "内联题目作业",
+        "type": "practice",
+        "start_time": now.isoformat(),
+        "end_time": (now + timedelta(days=7)).isoformat(),
+        "problems": [{
+            "title": "内联输出 OK",
+            "description": "读入任意内容并输出 OK",
+            "output_format": "OK",
+            "time_limit_ms": 1000,
+            "memory_limit_mb": 256,
+            "knowledge_tag": "内联题目",
+            "test_cases": [{"input_data": "x", "output_data": "OK", "score_weight": 100}],
+        }],
+    }, headers=_auth_headers(token_t))
+    check("发布作业时内联题目成功",
+          r.status_code in (200, 201) and r.json().get("problem_count") == 1,
+          f"status={r.status_code} body={r.json() if r.status_code == 200 else ''}")
+    inline_assignment_id = r.json().get("id") if r.status_code == 200 else 0
+
+    r = client.get(f"/api/v1/assignments/{inline_assignment_id}/problems",
+                   headers=_auth_headers(token_t))
+    check("内联题目与用例已持久化",
+          r.status_code == 200 and r.json().get("problem_count") == 1)
 
     r = client.get(f"/api/v1/assignments/{practice_id}", headers=_auth_headers(token_s1))
     check("练习作业详情 problem_count>=1", r.status_code == 200 and r.json().get("problem_count") >= 1)
@@ -309,12 +381,53 @@ def run_phase4_verification() -> None:
           r.status_code == 200 and r.json().get("status") == "AC"
           and r.json().get("is_final") is True,
           f"status={r.status_code} body={r.json() if r.status_code==200 else ''}")
+    check("考试提交隐藏详细用例数据",
+          r.status_code == 200 and r.json().get("case_results") == [],
+          f"case_results={r.json().get('case_results') if r.status_code==200 else ''}")
 
     r = client.post("/api/v1/judge/submit", json={
         "problem_id": problem_e,
         "code": _ac_code(),
     }, headers=_auth_headers(token_s1))
     check("考试重复提交被拒 409", r.status_code == 409)
+
+    # 非本班学生越权自测/提交
+    r = client.post("/api/v1/judge/run-test", json={
+        "problem_id": problem_p,
+        "code": _ac_code(),
+        "input_data": "x",
+    }, headers=_auth_headers(token_s3))
+    check("非本班学生自测被拒 403", r.status_code == 403, f"status={r.status_code}")
+
+    r = client.post("/api/v1/judge/submit", json={
+        "problem_id": problem_p,
+        "code": _ac_code(),
+    }, headers=_auth_headers(token_s3))
+    check("非本班学生提交被拒 403", r.status_code == 403, f"status={r.status_code}")
+
+    # 截止时间后禁止自测与提交
+    r = client.post("/api/v1/assignments", json={
+        "class_id": class_id,
+        "title": "已截止作业",
+        "type": "practice",
+        "start_time": (now - timedelta(days=2)).isoformat(),
+        "end_time": (now - timedelta(days=1)).isoformat(),
+    }, headers=_auth_headers(token_t))
+    expired_id = r.json().get("id") if r.status_code == 200 else 0
+    expired_problem = _add_problem(expired_id, "过期作业")
+
+    r = client.post("/api/v1/judge/run-test", json={
+        "problem_id": expired_problem,
+        "code": _ac_code(),
+        "input_data": "x",
+    }, headers=_auth_headers(token_s1))
+    check("截止后自测被拒 403", r.status_code == 403, f"status={r.status_code}")
+
+    r = client.post("/api/v1/judge/submit", json={
+        "problem_id": expired_problem,
+        "code": _ac_code(),
+    }, headers=_auth_headers(token_s1))
+    check("截止后提交被拒 403", r.status_code == 403, f"status={r.status_code}")
 
     # ---------------------------------------------------------------------
     # 5. 专属强化训练题 (Step 4.6)
@@ -348,8 +461,11 @@ def run_phase4_verification() -> None:
     check("教师查看练习学情大屏 200", r.status_code == 200, f"status={r.status_code}")
     dash = r.json() if r.status_code == 200 else {}
     check("及格率按满分提交计 100%", dash.get("pass_rate") == 100.0)
-    check("分数段聚合命中 80-100", any(b.get("band") == "80-100" and b.get("count") >= 1
+    check("分数段聚合命中 90-100", any(b.get("band") == "90-100" and b.get("count") >= 1
                                           for b in dash.get("score_bands", [])))
+    check("应交人数为班级成员数 2", dash.get("expected_student_count") == 2)
+    check("实交人数为 1", dash.get("submitted_student_count") == 1)
+    check("平均分为 100", dash.get("average_score") == 100.0)
     check("各题通过率聚合含 AC", all(ps.get("ac_rate") == 100.0
                                        for ps in dash.get("problem_stats", []) if ps.get("submissions") > 0))
 
@@ -359,21 +475,76 @@ def run_phase4_verification() -> None:
     # ---------------------------------------------------------------------
     # 7. LLM 路由未配置 Key 统一返回 503 (Step 4.8)
     # ---------------------------------------------------------------------
-    print("\n[测试项 7/9] LLM 路由未配置 Key 守卫 ...")
-    r = client.post("/api/v1/llm/generate-problem", json={"intent": "求两数和"}, headers=_auth_headers(token_t))
-    check("generate-problem 未配 key 返回 503", r.status_code == 503, f"status={r.status_code}")
+    print("\n[测试项 7/9] LLM 路由 Key 守卫与用例生成接口 ...")
+    # 测试隔离：临时清空真实 Key，保证校验 503 时绝不发起真实模型调用
+    original_llm_key = settings.LLM_API_KEY
+    settings.LLM_API_KEY = ""
+    try:
+        r = client.post("/api/v1/llm/generate-problem", json={"intent": "求两数和"}, headers=_auth_headers(token_t))
+        check("generate-problem 未配 key 返回 503", r.status_code == 503, f"status={r.status_code}")
 
-    r = client.post("/api/v1/llm/generate-test-inputs", json={"problem_id": problem_p}, headers=_auth_headers(token_t))
-    check("generate-test-inputs 未配 key 返回 503", r.status_code == 503)
+        r = client.post("/api/v1/llm/generate-test-inputs", json={"problem_id": problem_p}, headers=_auth_headers(token_t))
+        check("generate-test-inputs 未配 key 返回 503", r.status_code == 503)
 
-    r = client.post("/api/v1/llm/diagnose", json={"assignment_id": practice_id}, headers=_auth_headers(token_t))
-    check("diagnose 未配 key 返回 503", r.status_code == 503)
+        r = client.post("/api/v1/llm/diagnose", json={"assignment_id": practice_id}, headers=_auth_headers(token_t))
+        check("diagnose 未配 key 返回 503", r.status_code == 503)
 
-    r = client.post("/api/v1/llm/training", json={"weak_point": "指针"}, headers=_auth_headers(token_s1))
-    check("llm/training 未配 key 返回 503", r.status_code == 503)
+        r = client.post("/api/v1/llm/training", json={"weak_point": "指针"}, headers=_auth_headers(token_s1))
+        check("llm/training 未配 key 返回 503", r.status_code == 503)
 
-    r = client.post("/api/v1/llm/chat", json={"message": "解释递归"}, headers=_auth_headers(token_t))
-    check("llm/chat 未配 key 返回 503", r.status_code == 503)
+        r = client.post("/api/v1/llm/chat", json={"message": "解释递归"}, headers=_auth_headers(token_t))
+        check("llm/chat 未配 key 返回 503", r.status_code == 503)
+    finally:
+        settings.LLM_API_KEY = original_llm_key
+
+    # 配置 Key 时，用例生成接口应能正常返回（使用假生成器，禁止真实模型调用）
+    import app.api.llm as llm_api
+
+    class _FakeGenerator:
+        """测试替身：仅验证路由构造与响应，不触发任何网络请求"""
+        def generate_test_inputs(self, problem, count):
+            return ["1 2", "3 4"][:count]
+
+    original_generator_cls = llm_api.ProblemGenerator
+    llm_api.ProblemGenerator = lambda: _FakeGenerator()
+    try:
+        r = client.post("/api/v1/llm/generate-testcases",
+                        json={"problem_id": problem_p, "count": 2},
+                        headers=_auth_headers(token_t))
+        check("generate-testcases 配置 Key 后正常返回输入",
+              r.status_code == 200 and r.json().get("generated_inputs") == ["1 2", "3 4"],
+              f"status={r.status_code} body={r.json() if r.status_code == 200 else ''}")
+    finally:
+        llm_api.ProblemGenerator = original_generator_cls
+
+    # 学生诊断只能看到自己的失分提交，不能读取他人代码
+    _add_submission(_get_user_id("student1"), practice_id, problem_p,
+                    "// student1 wrong code", "WA", 0)
+    _add_submission(_get_user_id("student2"), practice_id, problem_p,
+                    "// student2 secret code", "WA", 0)
+
+    captured = {}
+
+    class _FakeDiagnostician:
+        """测试替身：记录路由传入的提交列表，不调用真实模型"""
+        def diagnose(self, assignment_title, submissions):
+            captured["submissions"] = submissions
+            return {"summary": "ok", "weak_points": [], "learning_guidance": ""}
+
+    original_diagnostician = llm_api.Diagnostician
+    llm_api.Diagnostician = lambda: _FakeDiagnostician()
+    try:
+        r = client.post("/api/v1/llm/diagnose-assignment",
+                        json={"assignment_id": practice_id},
+                        headers=_auth_headers(token_s1))
+        codes = [item.get("code", "") for item in captured.get("submissions", [])]
+        check("学生诊断仅包含自己的失分提交",
+              r.status_code == 200
+              and any("student1 wrong" in code for code in codes)
+              and all("student2 secret" not in code for code in codes),
+              f"status={r.status_code} codes={codes}")
+    finally:
+        llm_api.Diagnostician = original_diagnostician
 
     # ---------------------------------------------------------------------
     # 8. 权限与路由健壮性
@@ -389,7 +560,18 @@ def run_phase4_verification() -> None:
     check("未知作业详情返回 404", r.status_code == 404)
 
     # ---------------------------------------------------------------------
-    # 9. 汇总
+    # 9. 测试数据库清理
+    # ---------------------------------------------------------------------
+    engine.dispose()
+    if TEST_DB_FILE.exists():
+        try:
+            TEST_DB_FILE.unlink()
+        except Exception:
+            pass
+    check("Phase 4 测试数据库已清理", not TEST_DB_FILE.exists())
+
+    # ---------------------------------------------------------------------
+    # 10. 汇总
     # ---------------------------------------------------------------------
     print("\n" + "=" * 70)
     print(f">>> Phase 4 验收测试完成: 通过 {PASSED} 项, 失败 {FAILED} 项 <<<")

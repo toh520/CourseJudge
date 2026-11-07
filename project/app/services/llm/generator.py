@@ -87,6 +87,8 @@ class ProblemGenerator:
             {"role": "user", "content": build_problem_prompt(intent, knowledge_tag, difficulty)},
         ])
         problem = self._parse_model(raw_problem, GeneratedProblem)
+        if not problem.standard_code.strip():
+            raise LLMResponseFormatError("模型未返回可用的标准 C++ 解答代码")
 
         test_inputs = self.generate_test_inputs(problem, count)
         cases = verify_standard_code(

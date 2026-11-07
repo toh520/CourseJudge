@@ -57,14 +57,22 @@ if not exist "storage\temp_judge" mkdir "storage\temp_judge"
 if not exist "storage\test_cases" mkdir "storage\test_cases"
 
 :: 6. 启动系统客户端
-echo [4/4] 正在拉起 CourseJudge 桌面客户端...
+echo [4/4] 正在启动 CourseJudge...
 echo ==============================================================================
-echo 服务准备就绪，即将打开原生桌面窗口，请稍候...
-echo 提示: 如需停止运行，直接关闭桌面窗口或在当前终端按 Ctrl + C。
-echo ==============================================================================
-echo.
-
-.venv\Scripts\python run.py
+if exist "run.py" (
+    echo 服务准备就绪，即将打开原生桌面窗口，请稍候...
+    echo 提示: 如需停止运行，直接关闭桌面窗口或在当前终端按 Ctrl + C。
+    echo ==============================================================================
+    echo.
+    .venv\Scripts\python run.py
+) else (
+    echo [提示] 桌面客户端入口 run.py 将在 Phase 6 完成，当前以 Web 开发模式启动。
+    echo [提示] 启动成功后请在浏览器访问: http://127.0.0.1:8000/ui/
+    echo [提示] 如需停止运行，请在当前终端按 Ctrl + C。
+    echo ==============================================================================
+    echo.
+    .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+)
 
 if %errorlevel% neq 0 (
     echo.
