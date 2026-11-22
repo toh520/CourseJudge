@@ -1,0 +1,69 @@
+{
+  "version": "1.0",
+  "exported_at": "2026-11-22T12:19:51.318877+00:00",
+  "users": [
+    {
+      "username": "teacher",
+      "real_name": "演示教师",
+      "password": "123456",
+      "role": "teacher"
+    },
+    {
+      "username": "student",
+      "real_name": "演示学生",
+      "password": "123456",
+      "role": "student"
+    }
+  ],
+  "classes": [
+    {
+      "name": "2026程序设计与算法强化1班",
+      "invite_code": "CJ2026",
+      "teacher_username": "teacher",
+      "members": [
+        "student"
+      ]
+    }
+  ],
+  "assignments": [
+    {
+      "class_invite_code": "CJ2026",
+      "title": "第一次递归与动态规划专项练习",
+      "type": "practice",
+      "start_time": "2026-11-21T12:19:50.680660",
+      "end_time": "2026-12-22T12:19:50.680660",
+      "creator_username": "teacher",
+      "problems": [
+        {
+          "title": "斐波那契数列计算",
+          "description": "# 斐波那契数列计算\n\n## 题目描述\n已知斐波那契数列定义如下：\n- $F(1) = 1$\n- $F(2) = 1$\n- $F(N) = F(N-1) + F(N-2)$ (当 $N \\ge 3$)\n\n请编写 C++ 程序，输入正整数 $N$ ($1 \\le N \\le 40$)，输出对应的第 $N$ 项斐波那契数。",
+          "input_format": "输入一个正整数 N。",
+          "output_format": "输出一行一个整数，表示第 N 项斐波那契数的值。",
+          "sample_input": "5",
+          "sample_output": "5",
+          "time_limit_ms": 1000,
+          "memory_limit_mb": 256,
+          "knowledge_tag": "递归与记忆化搜索",
+          "is_ai_generated": false,
+          "test_cases": [
+            {
+              "input_data": "1",
+              "output_data": "1",
+              "score_weight": 30
+            },
+            {
+              "input_data": "5",
+              "output_data": "5",
+              "score_weight": 30
+            },
+            {
+              "input_data": "10",
+              "output_data": "55",
+              "score_weight": 40
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

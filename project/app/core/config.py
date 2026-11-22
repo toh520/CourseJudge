@@ -68,15 +68,14 @@ class Settings(BaseSettings):
     COMPILE_TIMEOUT_SECONDS: int = 10       # 编译阶段最长等待时间 10 秒
 
     # Windows 崩溃程序会因 WER (Windows 错误报告) 与 Defender 首次扫描而延迟自然退出
-    # (实测新编译程序首次崩溃约 9.5s，后续运行约 1.7s)。
-    # 该缓冲作为判题"强杀上界"(上界 = DEFAULT_TIME_LIMIT_MS + DEFAULT_EXEC_GRACE_MS)，
-    # 用于让"已崩溃程序(非零返回码)"与"真正死循环(上界仍不退出)"在语义上可区分，避免崩溃误判为 TLE。
+    # 该缓冲作为判题"强杀上界"(上界 = DEFAULT_TIME_LIMIT_MS + DEFAULT_EXEC_GRACE_MS)
     DEFAULT_EXEC_GRACE_MS: int = 12000      # 崩溃/系统错误报告/首次扫描缓冲毫秒数
 
     # --- 存储路径 ---
     STORAGE_DIR: str = "storage"
     TEMP_JUDGE_DIR: str = "storage/temp_judge"
     TEST_CASES_DIR: str = "storage/test_cases"
+    DATA_SNAPSHOT_FILE: str = "storage/data_snapshot.json"  # 团队共享数据快照文件路径
 
     # Pydantic Settings 配置：指定读取上级或当前目录下的 .env 文件
     model_config = SettingsConfigDict(

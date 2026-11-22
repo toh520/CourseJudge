@@ -29,6 +29,9 @@ venv/
 # 4. 判题临时工作目录与编译产物
 storage/temp_judge/
 project/storage/temp_judge/
+project/storage/test_judge/
+project/storage/*.db
+project/storage/*.sqlite*
 *.exe
 *.o
 *.obj
@@ -42,4 +45,3 @@ Thumbs.db
 # 6. 本地临时产物 (内置便携编译器需随仓库分发，故不再忽略 project/compiler/)
 project/winlibs.zip
 project/mini_test.cpp
-project/storage/
