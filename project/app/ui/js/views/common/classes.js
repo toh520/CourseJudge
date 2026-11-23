@@ -21,7 +21,6 @@ export async function render(root) {
     <div class="page">
       <header class="page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">${isTeacher ? 'Teacher Console' : 'Student Console'}</div>
           <h1 class="page-title">班级大厅</h1>
           <p class="page-desc">${isTeacher ? '创建班级、分发邀请码，并进入作业编排与学情分析。' : '通过教师提供的 6 位邀请码加入班级，开始完成作业。'}</p>
         </div>
@@ -80,7 +79,7 @@ function renderClasses(container, classes, reload) {
           el('div', { class: 'class-name' }, clazz.name),
           el('div', { class: 'class-meta' },
             el('span', {}, `${clazz.student_count ?? 0} 名学生`),
-            clazz.invite_code ? el('span', { class: 'inline-dot' }, '') : null,
+            clazz.teacher_name ? el('span', {}, `授课教师 ${clazz.teacher_name}`) : null,
           ),
         ),
         el('span', { class: 'badge badge-accent' }, isTeacher ? '教师' : '已加入'),

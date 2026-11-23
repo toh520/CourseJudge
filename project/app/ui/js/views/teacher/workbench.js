@@ -50,7 +50,6 @@ export async function render(root, params = {}) {
     <div class="page">
       <header class="page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">Teacher Workbench</div>
           <h1 class="page-title">作业编排</h1>
           <p class="page-desc">手动录入或让 AI 生成题目与用例，确认后一次性发布到班级。</p>
         </div>

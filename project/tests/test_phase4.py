@@ -18,6 +18,8 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 # 在 Windows 终端下统一标准输出为 UTF-8，防止 GBK 编码异常
 if sys.platform == "win32":
@@ -505,6 +507,7 @@ def run_phase4_verification() -> None:
         def generate_test_inputs(self, problem, count):
             return ["1 2", "3 4"][:count]
 
+    settings.LLM_API_KEY = "offline-fixture"
     original_generator_cls = llm_api.ProblemGenerator
     llm_api.ProblemGenerator = lambda: _FakeGenerator()
     try:
@@ -545,6 +548,7 @@ def run_phase4_verification() -> None:
               f"status={r.status_code} codes={codes}")
     finally:
         llm_api.Diagnostician = original_diagnostician
+        settings.LLM_API_KEY = original_llm_key
 
     # ---------------------------------------------------------------------
     # 8. 权限与路由健壮性
@@ -560,6 +564,42 @@ def run_phase4_verification() -> None:
     check("未知作业详情返回 404", r.status_code == 404)
 
     # ---------------------------------------------------------------------
+    # 使用独立考试验证改卷口径、跨设备状态和时间边界。
+    case = {"input_data": "", "output_data": "OK", "score_weight": 100}
+    questions = [{"title": title, "description": "输出 OK", "test_cases": [case]}
+                 for title in ("第一题", "第二题")]
+    payload = {"class_id": class_id, "title": "考试回归", "type": "exam", "problems": questions}
+    teacher_headers = _auth_headers(token_t)
+    student_headers = _auth_headers(token_s1)
+    api = "/api/v1"
+    broken = {**payload, "problems": [{**questions[0], "test_cases": []}]}
+    check("拒绝发布零用例题", client.post(f"{api}/assignments", json=broken, headers=teacher_headers).status_code == 422)
+    later = {**payload, "start_time": (now + timedelta(days=1)).isoformat()}
+    upcoming = client.post(f"{api}/assignments", json=later, headers=teacher_headers).json()["id"]
+    check("学生开考前不可预览考试题面", client.get(f"{api}/assignments/{upcoming}/problems", headers=student_headers).status_code == 403)
+    check("教师能够预览未来考试题面", client.get(f"{api}/assignments/{upcoming}/problems", headers=teacher_headers).status_code == 200)
+    active = client.post(f"{api}/assignments", json=payload, headers=teacher_headers).json()
+    check("作业起止时间携带 UTC 偏移", active["end_time"].endswith("+00:00"))
+    exam_path = f"{api}/assignments/{active['id']}"
+    pid = client.get(exam_path + "/problems", headers=student_headers).json()["problems"][0]["id"]
+    def submit_once(_):
+        """并行交卷，返回该请求的状态码。"""
+        return client.post(f"{api}/judge/submit", json={"problem_id": pid, "code": _ac_code()},
+                           headers=student_headers).status_code
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        check("并发交卷仅一份成功", sorted(threads.map(submit_once, range(2))) == [200, 409])
+    saved = client.get(exam_path + "/problems", headers=student_headers).json()["problems"][0]["my_submission"]
+    check("从服务端恢复自己的交卷结果", saved["is_final"] and saved["code"] == _ac_code() and saved["score"] == 100)
+    other = client.get(exam_path + "/problems", headers=_auth_headers(token_s2)).json()["problems"]
+    check("同班其他学生仍可答题且看不到本人的提交", all(item["my_submission"] is None for item in other))
+    rows = client.get(f"{api}/assignments/class/{class_id}", headers=student_headers).json()["assignments"]
+    row = next(item for item in rows if item["id"] == active["id"])
+    average = client.get(exam_path + "/dashboard", headers=teacher_headers).json()["average_score"]
+    check("两题交一题时师生总评一致", row["my_submitted_problems"] == 1 and row["my_best_score"] == average == 50)
+    with patch.object(settings, "LLM_API_KEY", "offline-fixture"):
+        check("考试期间不可获取考后诊断", client.post(f"{api}/llm/diagnose", json={"assignment_id": active["id"]},
+                                          headers=student_headers).status_code == 403)
+
     # 9. 测试数据库清理
     # ---------------------------------------------------------------------
     engine.dispose()

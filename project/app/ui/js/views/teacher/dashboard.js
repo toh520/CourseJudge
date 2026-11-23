@@ -48,7 +48,6 @@ export async function render(root, params = {}) {
     <div class="page">
       <header class="page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">Learning Analytics</div>
           <h1 class="page-title">班级学情大屏</h1>
           <p class="page-desc">聚合应交/实交、成绩分布、题目通过率与薄弱知识点，辅助针对性讲评。</p>
         </div>

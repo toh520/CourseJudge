@@ -21,7 +21,7 @@
 1. **🖥️ 独立桌面应用体验**：基于 **PyWebView** 打造现代独立窗口客户端，零浏览器标签杂乱干扰；内置自适应空闲端口探测与后端守护服务管理，一键启动即开即用。
 2. **⚙️ 编译器智能双模自适应探针**：
    - 自动检测并优先复用系统环境变量中的 `g++`；
-   - 若宿主机未安装任何 C++ 环境，自动平滑无感降级到项目内置便携绿色版 MinGW 编译器，**真正实现答辩演示在任何纯净 Windows 电脑上零配置评测**。
+   - Windows x64 首次启动缺少 g++ 时，启动脚本会下载约 66 MiB 的 w64devkit，校验 SHA-256 后解包。后续启动直接复用。离线答辩可提前在联网电脑准备好工具链，连同 `project/compiler/` 一起复制。
 3. **🛡️ 纯文本 JSON 团队数据快照无损同步**：
    - 二进制 `.db` 文件不提交 Git，彻底消除代码合并冲突；
    - 提供 `storage/data_snapshot.json` 快照机制与 `--sync` / `--export` 工具，团队拉取代码后双击批处理脚本即可**秒级同步班级、作业与测试用例数据**。
@@ -50,6 +50,12 @@ cd CourseJudge
 > 💡 **提示**：如需体验 AI 智能出题、用例生成或考后短板诊断功能，请使用记事本打开 `project/.env`，填入您的大模型 `LLM_API_KEY` 即可。未配置 Key 时系统其他功能均 100% 正常运行。
 
 ---
+
+## 界面预览
+
+![登录工作台](docs/previews/login.png)
+
+![学生作业大厅](docs/previews/assignments.png)
 
 ## 👥 默认演示账号 (开箱即用)
 
@@ -90,7 +96,7 @@ CourseJudge/
     │   │   └── analytics/          # 学情大屏数据聚合分析
     │   └── ui/                     # 桌面端前端工程 (HTML, CSS, Monaco Editor, ECharts)
     ├── storage/                    # 数据持久与共享目录 (含 data_snapshot.json 共享快照)
-    ├── compiler/                   # 内置便携版绿色 C++ 编译器 (无环境平滑降级)
+    ├── compiler/                   # 首次下载后保留的便携版 C++ 工具链
     ├── tests/                      # 自动化测试用例集 (test_phase1 ~ test_phase6)
     ├── run.py                      # 桌面客户端启动总入口
     ├── start.bat                   # 核心启动脚本

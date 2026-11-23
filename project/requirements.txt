@@ -1,4 +1,4 @@
-# ==============================================================================
+# -*- coding: utf-8 -*-
 # CourseJudge 智能代码判题与教学辅助系统 - 环境依赖清单
 # 运行环境要求: Python >= 3.10
 # 安装方式: pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple

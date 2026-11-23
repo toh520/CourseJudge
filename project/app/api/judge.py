@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -141,6 +142,17 @@ def submit_solution(
             detail=f"判分服务异常: {exc}",
         ) from exc
 
+    if assignment.type == "exam":
+        # 在判分完成后才获取写锁。SQLite 串行化这次短写入，其他数据库锁住题目行。
+        # 兼容旧数据库，不需要迁移已有的正式成绩。
+        db.execute(update(Problem).where(Problem.id == problem.id).values(id=Problem.id))
+        existing = db.query(Submission.id).filter_by(
+            problem_id=problem.id, user_id=current_user.id, is_final=True,
+        ).with_for_update().first()
+        if existing:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="本题已经交卷，请刷新查看结果")
+
     # 落库提交记录
     submission = Submission(
         user_id=current_user.id,
@@ -169,6 +181,7 @@ def submit_solution(
         "total_cases": judge_result["total_cases"],
         "max_time_ms": judge_result["max_time_ms"],
         "is_final": submission.is_final,
+        "compiler_output": submission.compiler_output,
         # 考试模式隐藏详细测试点数据，防止学生通过响应内容反推隐藏用例
         "case_results": [] if assignment.type == "exam" else judge_result["case_results"],
     }

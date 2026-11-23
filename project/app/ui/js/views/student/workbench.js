@@ -4,6 +4,7 @@
  *          支持练习多次提交、考试单次交卷锁定、AI 短板诊断与一键补弱。
  */
 
+import { state } from '../../store.js';
 import { api } from '../../api/client.js';
 import { navigate } from '../../router.js';
 import { escapeHtml, fmtDate } from '../../components/base/dom.js';
@@ -51,8 +52,10 @@ export async function render(root, params = {}) {
   }
 
   const isExam = assignment.type === 'exam';
-  const lockKey = `cj_exam_submitted_${assignmentId}_${problemId}`;
-  let examLocked = isExam && window.localStorage.getItem(lockKey) === '1';
+  const ended = assignment.time_status === 'ended';
+  const canDiagnose = !isExam || ended;
+  let examLocked = isExam && Boolean(problem.my_submission?.is_final);
+  const compilerMissing = state.status?.compiler_probe?.ready === false;
 
   root.innerHTML = `
     <div class="lab-grid">
@@ -72,6 +75,8 @@ export async function render(root, params = {}) {
         </div>
         ${isExam ? `<div class="exam-banner"><strong>考试模式</strong>：正式交卷仅限一次，提交后本题将锁定；答题期间可多次自测运行。</div>` : ''}
         <div class="markdown" id="problem-desc"></div>
+        ${problem.input_format ? `<div class="io-format"><strong>输入格式</strong><p>${escapeHtml(problem.input_format)}</p></div>` : ''}
+        ${problem.output_format ? `<div class="io-format"><strong>输出格式</strong><p>${escapeHtml(problem.output_format)}</p></div>` : ''}
         <div class="sample-grid">
           <div class="sample-card">
             <div class="sample-label">样例输入</div>
@@ -119,7 +124,7 @@ export async function render(root, params = {}) {
   const submitButton = root.querySelector('#btn-submit');
   const diagnoseButton = root.querySelector('#btn-diagnose');
 
-  const codeKey = `cj_code_${problem.id}`;
+  const codeKey = `cj_code_${state.user.id}_${problem.id}`;
   let savedCode = '';
   try {
     savedCode = window.localStorage.getItem(codeKey) || '';
@@ -128,20 +133,25 @@ export async function render(root, params = {}) {
   }
 
   const editor = await createEditor(root.querySelector('#editor-host'), {
-    value: savedCode || cppTemplate(problem.title),
+    value: (examLocked ? problem.my_submission.code : savedCode || problem.my_submission?.code) || cppTemplate(problem.title),
     language: 'cpp',
-    readOnly: examLocked,
+    readOnly: examLocked || ended,
     onChange: (value) => {
       try { window.localStorage.setItem(codeKey, value); } catch (err) { /* 忽略存储失败 */ }
     },
   });
 
+  if (ended || compilerMissing) {
+    root.querySelector('#btn-run').disabled = true;
+    submitButton.disabled = true;
+    setOutput(ended ? '作业已截止，可查看题面和交卷结果。' : '编译器未就绪。请安装 g++ 或配置便携工具链后重启，草稿仍可保存。');
+  }
+  if (canDiagnose && problem.my_submission) diagnoseButton.classList.remove('hidden');
   if (examLocked) {
     submitButton.disabled = true;
     submitButton.textContent = '已交卷';
-    diagnoseButton.classList.remove('hidden');
     resultArea.classList.remove('hidden');
-    resultArea.innerHTML = '<div class="exam-banner"><strong>本题已交卷</strong>：可继续自测查看运行结果，但无法再次正式提交。</div>';
+    resultArea.innerHTML = `<div class="exam-banner"><strong>本题已交卷</strong> ${statusBadge(problem.my_submission.status)} 得分 ${problem.my_submission.score} / 100</div>`;
   }
 
   window.setTimeout(() => editor.layout(), 30);
@@ -206,11 +216,10 @@ export async function render(root, params = {}) {
     try {
       const result = await api.judge.submit({ problem_id: problem.id, code: editor.getValue() });
       renderSubmitResult(result, isExam);
-      diagnoseButton.classList.remove('hidden');
+      if (canDiagnose) diagnoseButton.classList.remove('hidden');
       toast(result.status === 'AC' ? '恭喜，全部用例通过！' : `评测完成：${result.status}`, result.status === 'AC' ? 'success' : 'warning');
       if (isExam) {
         examLocked = true;
-        try { window.localStorage.setItem(lockKey, '1'); } catch (err) { /* ignore */ }
         editor.setReadOnly(true);
         submitButton.textContent = '已交卷';
       } else {
@@ -220,8 +229,10 @@ export async function render(root, params = {}) {
     } catch (err) {
       resultArea.innerHTML = `<div class="text-danger small">${escapeHtml(err.message)}</div>`;
       toast(err.message, 'error');
-      submitButton.disabled = false;
-      submitButton.textContent = '提交判题';
+      examLocked = isExam && err.status === 409;
+      submitButton.disabled = examLocked;
+      if (examLocked) editor.setReadOnly(true);
+      submitButton.textContent = examLocked ? '已交卷' : '提交判题';
     }
   });
 

@@ -4,6 +4,7 @@
  *          提交判分与历史最佳状态回写。
  */
 
+import { state } from '../../store.js';
 import { api } from '../../api/client.js';
 import { navigate } from '../../router.js';
 import { escapeHtml, fmtDate } from '../../components/base/dom.js';
@@ -21,7 +22,6 @@ export async function render(root) {
     <div class="page">
       <header class="page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">Personal Training</div>
           <h1 class="page-title">强化训练题本</h1>
           <p class="page-desc">针对考后诊断出的薄弱知识点，AI 为你生成的专属巩固题。</p>
         </div>
@@ -137,7 +137,7 @@ export async function render(root) {
 
     detail.querySelector('#training-desc').innerHTML = renderMarkdown(problem.description || '');
 
-    const codeKey = `cj_training_code_${problem.id}`;
+    const codeKey = `cj_training_code_${state.user.id}_${problem.id}`;
     let saved = '';
     try { saved = window.localStorage.getItem(codeKey) || ''; } catch (err) { saved = ''; }
 

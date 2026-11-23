@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import urllib.request
 from pathlib import Path
 
@@ -51,7 +52,9 @@ class TestPhase6Integration(unittest.TestCase):
         """初始化测试数据库"""
         init_db()
 
-    def test_01_compiler_probe_fallback_and_builtin_judge(self):
+    @patch.object(CompilerProbe, "find_system_compiler", return_value=None)
+    @patch.object(settings, "COMPILER_PROBE_MODE", "auto")
+    def test_01_compiler_probe_fallback_and_builtin_judge(self, _system_lookup):
         """
         验证 Step 6.2: 智能双模探针在 PATH 移除 g++ 时的平滑降级机制与 C++ 编译执行
         """
@@ -60,6 +63,8 @@ class TestPhase6Integration(unittest.TestCase):
 
         # 检查是否成功探测到可用编译器
         self.assertTrue(status.get("ready"), f"系统未检测到任何可用 C++ 编译器！详情: {status}")
+
+        self.assertEqual(status["resolved_compiler"], probe.find_builtin_compiler())
 
         # 验证沙箱编译与受限执行
         sandbox = SandboxRunner()

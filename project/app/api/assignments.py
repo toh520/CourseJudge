@@ -3,7 +3,7 @@
 功能描述: 作业与考试编排路由。支持教师向班级发布作业/考试（练习/考试双模式）、
           查看&获取作业题目列表，并在报错时给出明确提示。
 遵循规范: 权限隔离——发布仅限本班教师；题目列表对班级内学生与教师开放；
-          时间窗在业务层不强制（当前阶段由前端控制），后续可扩展。
+          考前隐藏题面，时间窗由服务端统一校验。
 """
 
 from datetime import datetime, timedelta, timezone
@@ -118,6 +118,10 @@ def create_assignment(
             detail="只有本班教师可发布作业",
         )
 
+    for problem in payload.problems:
+        if not any(case.score_weight > 0 for case in problem.test_cases):
+            raise HTTPException(status_code=422, detail="每道题至少需要一组有正分值的测试用例")
+
     now = datetime.now(timezone.utc)
     start_time = _as_utc(payload.start_time) or now
     end_time = _as_utc(payload.end_time) or (start_time + timedelta(days=7))
@@ -177,8 +181,8 @@ def create_assignment(
         "class_id": assignment.class_id,
         "title": assignment.title,
         "type": assignment.type,
-        "start_time": assignment.start_time.isoformat() if assignment.start_time else None,
-        "end_time": assignment.end_time.isoformat() if assignment.end_time else None,
+        "start_time": _as_utc(assignment.start_time).isoformat() if assignment.start_time else None,
+        "end_time": _as_utc(assignment.end_time).isoformat() if assignment.end_time else None,
         "problem_count": len(payload.problems),
     }
 
@@ -212,6 +216,9 @@ def list_assignment_problems(
         )
     _ensure_access(assignment, current_user, db)
 
+    if assignment.type == "exam" and current_user.role == "student" and _time_status(assignment) == "upcoming":
+        raise HTTPException(status_code=403, detail="考试开始后可查看题目")
+
     problems = (
         db.query(Problem)
         .filter(Problem.assignment_id == assignment_id)
@@ -219,12 +226,22 @@ def list_assignment_problems(
         .all()
     )
 
+    # 每题返回本人的最后一次提交，换设备也能恢复交卷状态及结果。
+    latest = {}
+    if current_user.role == "student":
+        for submission in db.query(Submission).filter_by(
+            assignment_id=assignment.id, user_id=current_user.id
+        ).order_by(Submission.id).all():
+            latest[submission.problem_id] = {
+                "score": submission.score, "status": submission.status,
+                "is_final": submission.is_final, "code": submission.code,
+            }
     return {
         "assignment_id": assignment.id,
         "assignment_title": assignment.title,
         "assignment_type": assignment.type,
         "problem_count": len(problems),
-        "problems": [_problem_to_dict(p) for p in problems],
+        "problems": [dict(_problem_to_dict(p), my_submission=latest.get(p.id)) for p in problems],
     }
 
 
@@ -285,8 +302,8 @@ def list_class_assignments(
             "id": assignment.id,
             "title": assignment.title,
             "type": assignment.type,
-            "start_time": assignment.start_time.isoformat() if assignment.start_time else None,
-            "end_time": assignment.end_time.isoformat() if assignment.end_time else None,
+            "start_time": _as_utc(assignment.start_time).isoformat() if assignment.start_time else None,
+            "end_time": _as_utc(assignment.end_time).isoformat() if assignment.end_time else None,
             "time_status": _time_status(assignment),
             "problem_count": len(assignment.problems),
         }
@@ -300,7 +317,12 @@ def list_class_assignments(
                 .all()
             )
             item["my_submission_count"] = len(my_submissions)
-            item["my_best_score"] = max((sub.score for sub in my_submissions), default=0)
+            best = {}
+            for submission in my_submissions:
+                pid = submission.problem_id
+                best[pid] = max(best.get(pid, 0), submission.score)
+            item["my_submitted_problems"] = len(best)
+            item["my_best_score"] = round(sum(best.values()) / item["problem_count"], 1) if item["problem_count"] else 0
         items.append(item)
 
     return {
@@ -345,10 +367,11 @@ def get_assignment_detail(
         "class_id": assignment.class_id,
         "title": assignment.title,
         "type": assignment.type,
-        "start_time": assignment.start_time.isoformat() if assignment.start_time else None,
-        "end_time": assignment.end_time.isoformat() if assignment.end_time else None,
+        "start_time": _as_utc(assignment.start_time).isoformat() if assignment.start_time else None,
+        "end_time": _as_utc(assignment.end_time).isoformat() if assignment.end_time else None,
         "problem_count": len(assignment.problems),
         "submission_count": len(assignment.submissions),
+        "time_status": _time_status(assignment),
     }
 
 

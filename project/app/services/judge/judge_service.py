@@ -52,7 +52,11 @@ class JudgeService:
             tuple: (compile_ok, compiler_output, work_dir, executable_path)
         """
         work_dir = self.sandbox.create_work_dir()
-        compile_ok, compiler_output, executable_path = self.sandbox.compile_source(source_code, work_dir)
+        try:
+            compile_ok, compiler_output, executable_path = self.sandbox.compile_source(source_code, work_dir)
+        except Exception:
+            self.sandbox.cleanup(work_dir)
+            raise
         return compile_ok, compiler_output, work_dir, executable_path
 
     def run_custom_test(
@@ -149,6 +153,9 @@ class JudgeService:
         返回:
             dict: 判题结果字典，包含最终状态、得分、通过数、最大耗时及每个用例的明细
         """
+        if not test_cases or not any((case.score_weight or 0) > 0 for case in test_cases):
+            raise ValueError("题目缺少有效评测用例，请联系教师补充")
+
         result = {
             "status": self.STATUS_CE,
             "score": 0,
@@ -226,10 +233,7 @@ class JudgeService:
                 })
 
             # 计算最终百分比得分 (权重加权)
-            if total_weight > 0:
-                result["score"] = int(round(gained_weight / total_weight * 100))
-            else:
-                result["score"] = 100 if final_status == self.STATUS_AC and result["total_cases"] == 0 else result["score"]
+            result["score"] = int(round(gained_weight / total_weight * 100))
 
             # 全部通过且无任何错误时保持 AC
             result["status"] = final_status if (result["passed_cases"] < result["total_cases"] or error_flag) else self.STATUS_AC

@@ -23,7 +23,6 @@ export async function render(root, params = {}) {
     <div class="page">
       <header class="page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">Student Console</div>
           <h1 class="page-title">我的作业</h1>
           <p class="page-desc">查看所属班级的练习与考试，进入编程工作台完成自测与交卷。</p>
         </div>
@@ -78,7 +77,7 @@ export async function render(root, params = {}) {
   }
 
   const total = sections.reduce((sum, section) => sum + section.assignments.length, 0);
-  if (!total) {
+  if (!total && !sections.some((section) => section.error)) {
     content.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">◫</div>
@@ -126,8 +125,10 @@ export async function render(root, params = {}) {
 
   function assignmentCard(assignment) {
     const remain = countdown(assignment.end_time);
-    const submitted = Number(assignment.my_submission_count || 0) > 0;
-    const examLocked = assignment.type === 'exam' && submitted;
+    const completed = assignment.my_submitted_problems || 0;
+    const examLocked = assignment.type === 'exam' && completed > 0 && completed === assignment.problem_count;
+    const upcoming = assignment.type === 'exam' && assignment.time_status === 'upcoming';
+    const review = examLocked || assignment.time_status === 'ended';
 
     const card = el('article', { class: 'assignment-card' });
     card.innerHTML = `
@@ -142,16 +143,17 @@ export async function render(root, params = {}) {
         </div>
       </div>
       <div class="meta-row">
-        <span>${assignment.problem_count} 道题</span>
+        <span>已提交 ${completed} / ${assignment.problem_count} 题</span>
         <span class="inline-dot"></span>
         <span>${fmtDate(assignment.start_time)} → ${fmtDate(assignment.end_time)}</span>
       </div>
       <div class="countdown ${remain.ended ? 'ended' : ''}">${remain.text}</div>
       <div class="assignment-foot">
-        <div class="assignment-score">最佳得分 <strong>${scoreText(assignment.my_best_score ?? 0)}</strong></div>
-        <button class="btn btn-primary btn-sm" type="button">${examLocked ? '查看结果' : '开始作答'}</button>
+        <div class="assignment-score">作业总评 <strong>${completed ? scoreText(assignment.my_best_score) : '—'}</strong></div>
+        <button class="btn btn-primary btn-sm" type="button">${upcoming ? '尚未开考' : review ? '查看题目与结果' : completed ? '继续作答' : '开始作答'}</button>
       </div>
     `;
+    card.querySelector('button').disabled = upcoming;
     card.querySelector('button').addEventListener('click', () => openProblemPicker(assignment));
     return card;
   }
@@ -181,7 +183,7 @@ export async function render(root, params = {}) {
                 <strong>${index + 1}. ${escapeHtml(problem.title)}</strong>
                 <div class="small dim">${escapeHtml(problem.knowledge_tag || '未标注知识点')} · ${problem.time_limit_ms}ms / ${problem.memory_limit_mb}MB</div>
               </div>
-              <button class="btn btn-primary btn-sm" type="button" data-problem="${problem.id}">进入</button>
+              <button class="btn btn-primary btn-sm" type="button" data-problem="${problem.id}">${problem.my_submission?.is_final ? '查看交卷' : '进入'}</button>
             </div>
           `).join('')}
         </div>

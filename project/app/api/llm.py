@@ -23,7 +23,7 @@ from app.services.llm.generator import ProblemGenerator
 from app.services.llm.trainer import TrainingProblemGenerator
 from app.services.llm.assistant import AssistantService
 from app.api.deps import get_current_user
-from app.api.assignments import _ensure_access
+from app.api.assignments import _ensure_access, _time_status
 
 router = APIRouter()
 
@@ -93,6 +93,8 @@ def ai_generate_problem(
     异常:
         HTTPException 503: 未配置 LLM Key
     """
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="仅教师可使用智能出题")
     _require_llm_key()
     try:
         generator = ProblemGenerator()
@@ -131,6 +133,8 @@ def ai_generate_test_inputs(
         HTTPException 404: 题目不存在
         HTTPException 503: 未配置 LLM Key
     """
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="仅教师可生成测试输入")
     _require_llm_key()
     problem = db.query(Problem).filter(Problem.id == payload.problem_id).first()
     if not problem:
@@ -139,6 +143,7 @@ def ai_generate_test_inputs(
             detail="题目不存在",
         )
 
+    _ensure_access(problem.assignment, current_user, db)
     try:
         generator = ProblemGenerator()
         from app.services.llm.common.schemas import GeneratedProblem
@@ -194,6 +199,9 @@ def ai_diagnose(
             detail="作业不存在",
         )
     _ensure_access(assignment, current_user, db)
+
+    if current_user.role == "student" and assignment.type == "exam" and _time_status(assignment) != "ended":
+        raise HTTPException(status_code=403, detail="考试结束后可查看诊断")
 
     # 收集该作业的提交摘要；学生只能诊断自己的提交，教师可查看全班用于讲评
     submissions_query = db.query(Submission).filter(

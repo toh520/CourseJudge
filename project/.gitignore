@@ -70,3 +70,7 @@ Desktop.ini
 !compiler/lib64/
 !compiler/lib64/**
 !compiler/**
+
+# 工具链由哈希固定的安装脚本还原，离线交付可保留本地目录。
+/compiler/
+/.cj-toolchain-*/

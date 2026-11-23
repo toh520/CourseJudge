@@ -56,12 +56,12 @@ function renderShell() {
   app.innerHTML = `
     <div class="app-shell" id="app-shell">
       <header class="topbar">
-        <button class="btn btn-ghost btn-icon menu-toggle" type="button" id="menu-toggle" aria-label="切换导航">☰</button>
+        <button class="btn btn-ghost btn-icon menu-toggle" type="button" id="menu-toggle" aria-label="切换导航" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div class="brand">
           <div class="brand-mark">&lt;/&gt;</div>
           <div>
             <div class="brand-name">CourseJudge</div>
-            <span class="brand-sub">Intelligent Code Judge</span>
+            <span class="brand-sub">程序设计课堂</span>
           </div>
         </div>
         <div class="topbar-spacer"></div>
@@ -80,14 +80,12 @@ function renderShell() {
       </header>
 
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-label">工作区</div>
+        <div class="sidebar-label">${user?.role === 'teacher' ? '教师工作区' : '学生工作区'}</div>
         <nav id="nav-list"></nav>
-        <div class="sidebar-footer">
-          <div>CourseJudge v1.0.0</div>
-          <div style="margin-top:4px">AI 判题 · 学情诊断 · 强化训练</div>
-        </div>
+
       </aside>
 
+      <button class="nav-backdrop" type="button" tabindex="-1" aria-label="关闭导航"></button>
       <main class="main"><div id="view-root"></div></main>
 
       <footer class="statusbar">
@@ -109,13 +107,24 @@ function renderShell() {
     button.innerHTML = `<span class="nav-icon">${item.icon}</span><span>${item.label}</span>`;
     button.addEventListener('click', () => {
       navigate(item.path);
-      document.getElementById('app-shell')?.classList.remove('sidebar-open');
+      setNavOpen(false);
     });
     navList.appendChild(button);
   });
 
-  document.getElementById('menu-toggle').addEventListener('click', () => {
-    document.getElementById('app-shell')?.classList.toggle('sidebar-open');
+  const shell = document.getElementById('app-shell');
+  const toggle = document.getElementById('menu-toggle');
+  function setNavOpen(open) {
+    shell.classList.toggle('sidebar-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+  }
+  toggle.addEventListener('click', () => setNavOpen(!shell.classList.contains('sidebar-open')));
+  shell.querySelector('.nav-backdrop').addEventListener('click', () => setNavOpen(false));
+  shell.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && shell.classList.contains('sidebar-open')) {
+      setNavOpen(false);
+      toggle.focus();
+    }
   });
   document.getElementById('logout').addEventListener('click', logout);
 
@@ -128,7 +137,10 @@ function renderShell() {
 function updateActiveNav(path) {
   document.querySelectorAll('.nav-item').forEach((item) => {
     const base = item.dataset.path;
-    item.classList.toggle('active', path === base || path.startsWith(`${base}/`));
+    const active = path === base || path.startsWith(`${base}/`);
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
   });
 }
 

@@ -17,7 +17,7 @@ project/
 │       ├── js/components/# 编辑器、图表、Markdown、弹窗、AI 助手
 │       ├── js/views/     # 登录、教师、学生、班级、强化训练视图
 │       └── libs/         # 本地 Monaco Editor 与 ECharts
-├── compiler/             # [可选内置] 绿色便携式 g++ 编译器 (~40-50MB)
+├── compiler/             # 首次启动自动准备的 Windows x64 便携 g++ 工具链
 ├── storage/              # 本地文件存储 (用例与临时编译目录)
 ├── tests/                # Phase 1~5 自动化验收脚本
 ├── .env.example          # 环境变量模板 (复制为 .env 填写私密密钥)

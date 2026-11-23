@@ -148,6 +148,7 @@ def list_my_classes(
             # 邀请码仅对教师展示，学生端无需再次获取
             "invite_code": clazz.invite_code if current_user.role == "teacher" else None,
             "teacher_id": clazz.teacher_id,
+            "teacher_name": clazz.teacher.real_name if clazz.teacher else "",
             "student_count": len(clazz.members),
         }
         for clazz in classes

@@ -9,7 +9,7 @@ echo.
 
 :: 1. 检查当前目录下是否存在 Python
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [错误] 本机未检测到 Python 运行环境！
     echo 请先安装 Python 3.10 或更高版本，并勾选 "Add Python to PATH"。
     echo.
@@ -21,7 +21,7 @@ if %errorlevel% neq 0 (
 if not exist ".venv\Scripts\python.exe" (
     echo [1/5] 未检测到虚拟环境，正在自动为团队成员创建 .venv ...
     python -m venv .venv
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
         echo [错误] 虚拟环境创建失败，请检查 Python 安装权限。
         pause
         exit /b 1
@@ -34,9 +34,10 @@ if not exist ".venv\Scripts\python.exe" (
 :: 3. 自动同步并安装 requirements.txt 依赖 (使用清华镜像加速)
 echo [2/5] 正在检查并同步项目依赖包 (使用国内清华镜像源加速)...
 .venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --quiet
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [警告] 依赖自动同步出现警告，正在尝试重试...
-    .venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    .venv\Scripts\pip install -r requirements.txt --index-url https://pypi.org/simple
+    if errorlevel 1 exit /b 1
 )
 echo [2/5] 依赖检查与同步完成！
 
@@ -61,6 +62,9 @@ if exist "storage\data_snapshot.json" (
     .venv\Scripts\python -m app.core.seed --init
 )
 
+:: 默认 Windows x64 环境首次使用时按校验摘要安装便携工具链
+.venv\Scripts\python tools\setup_compiler.py
+
 :: 6. 启动系统客户端
 echo [5/5] 正在启动 CourseJudge...
 echo ==============================================================================
@@ -78,7 +82,7 @@ if exist "run.py" (
     .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 )
 
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo.
     echo [提示] 应用程序已退出。如果运行中发生异常，请检查上方日志。
     pause

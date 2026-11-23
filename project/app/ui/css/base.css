@@ -6,22 +6,22 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0b0e14;
-  --bg-soft: #0e121a;
-  --bg-elevated: #121722;
-  --bg-panel: #151b27;
-  --bg-hover: #1a2231;
+  --bg: #141b2a;
+  --bg-soft: #192234;
+  --bg-elevated: #202b40;
+  --bg-panel: #212d43;
+  --bg-hover: #2a3851;
   --bg-active: #1e293b;
 
-  --border: #222c3d;
-  --border-strong: #2f3d54;
+  --border: #34425b;
+  --border-strong: #4b5c79;
 
   --text: #e8eefb;
-  --text-muted: #93a1b8;
-  --text-dim: #617089;
+  --text-muted: #b4c2d8;
+  --text-dim: #9baac2;
 
-  --accent: #4c8dff;
-  --accent-hover: #6aa1ff;
+  --accent: #a4baff;
+  --accent-hover: #c0ceff;
   --accent-soft: rgba(76, 141, 255, 0.14);
   --accent-line: rgba(76, 141, 255, 0.42);
 
@@ -37,7 +37,7 @@
   --purple-soft: rgba(188, 140, 255, 0.14);
 
   --radius-sm: 6px;
-  --radius: 10px;
+  --radius: 12px;
   --radius-lg: 14px;
   --radius-xl: 20px;
 
@@ -49,7 +49,7 @@
   --font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 
   --topbar-h: 56px;
-  --sidebar-w: 224px;
+  --sidebar-w: 210px;
   --statusbar-h: 28px;
 }
 
@@ -535,4 +535,16 @@ button {
 @keyframes boot-slide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(350%); }
+}
+:where(button, a, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
